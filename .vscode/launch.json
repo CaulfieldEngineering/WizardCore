@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Standalone (Debug)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/plugin/${workspaceFolderBasename}_artefacts/Debug/Standalone/${workspaceFolderBasename}.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Standalone (Release)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/plugin/${workspaceFolderBasename}_artefacts/Release/Standalone/${workspaceFolderBasename}.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false
+    },
+    {
+      "name": "VST3, Cubase 12",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "C:/Program Files/Steinberg/Cubase 12/Cubase12.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false
+    }
+  ]
+}

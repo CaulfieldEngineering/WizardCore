@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Standalone – Debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build",
+        "--config",
+        "Debug",
+        "--target",
+        "${workspaceFolderBasename}_Standalone"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Build Standalone – Release",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build",
+        "--config",
+        "Release",
+        "--target",
+        "${workspaceFolderBasename}_Standalone"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Build VST3 – Debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build",
+        "--config",
+        "Debug",
+        "--target",
+        "${workspaceFolderBasename}_VST3"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Build VST3 – Release",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build",
+        "--config",
+        "Release",
+        "--target",
+        "${workspaceFolderBasename}_VST3"
+      ],
+      "group": "build"
+    }
+  ]
+}
