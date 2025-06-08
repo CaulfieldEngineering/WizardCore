@@ -70,9 +70,18 @@ namespace audio_plugin {
 
     void AudioPluginAudioProcessor::prepareToPlay(double sampleRate,
                                                 int samplesPerBlock) {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-    juce::ignoreUnused(sampleRate, samplesPerBlock);
+        DBG("prepareToPlay called with sample rate: " << sampleRate);
+        
+        if (sampleRate <= 0.0) {
+            DBG("Invalid sample rate, returning");
+            return;
+        }
+        
+        DBG("Preparing delay line");
+        delayLine.prepare(sampleRate, 2.0);
+        DBG("Setting delay time");
+        delayLine.setDelayTime(0.5);
+        DBG("prepareToPlay completed");
     }
 
     void AudioPluginAudioProcessor::releaseResources() {
@@ -106,57 +115,79 @@ namespace audio_plugin {
 
     void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                                                 juce::MidiBuffer &midiMessages) {
-    juce::ignoreUnused(midiMessages);
+        juce::ignoreUnused(midiMessages);
 
-    juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels = getTotalNumInputChannels();
-    auto totalNumOutputChannels = getTotalNumOutputChannels();
+        juce::ScopedNoDenormals noDenormals;
+        auto totalNumInputChannels = getTotalNumInputChannels();
+        auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
-    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear(i, 0, buffer.getNumSamples());
+        DBG("processBlock: Input channels: " << totalNumInputChannels << ", Output channels: " << totalNumOutputChannels);
 
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
-    for (int channel = 0; channel < totalNumInputChannels; ++channel) {
-        auto *channelData = buffer.getWritePointer(channel);
-        juce::ignoreUnused(channelData);
-        // ..do something to the data...
-    }
+        // Clear any output channels that don't have input data
+        for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
+            buffer.clear(i, 0, buffer.getNumSamples());
+
+        // Safety check - if no input channels, just return
+        if (totalNumInputChannels == 0) {
+            DBG("No input channels, returning");
+            return;
+        }
+
+        // Process each channel
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            auto* channelData = buffer.getWritePointer(channel);
+            if (channelData == nullptr) {
+                DBG("Null channel data for channel: " << channel);
+                continue;
+            }
+
+            DBG("Processing channel: " << channel << " with " << buffer.getNumSamples() << " samples");
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            {
+                float input = channelData[sample];
+                float delayed = delayLine.process(input);
+                channelData[sample] = delayed;
+            }
+        }
+        DBG("processBlock completed");
     }
 
     bool AudioPluginAudioProcessor::hasEditor() const {
-    return true; // (change this to false if you choose to not supply an editor)
+    	return true; // (change this to false if you choose to not supply an editor)
     }
 
     juce::AudioProcessorEditor *AudioPluginAudioProcessor::createEditor() {
-        // return new AudioPluginAudioProcessorEditor(*this);
-        return new juce::GenericAudioProcessorEditor(*this);
+    	// return new AudioPluginAudioProcessorEditor(*this);
+    	return new juce::GenericAudioProcessorEditor(*this);
     }
 
-    void AudioPluginAudioProcessor::getStateInformation(
-        juce::MemoryBlock &destData) {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
-    juce::ignoreUnused(destData);
+    void AudioPluginAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+    {
+        // Create an XML element to store our parameters
+        auto state = juce::XmlElement("PluginState");
+        
+        // Save the delay time
+        state.setAttribute("delayTime", delayLine.getDelayTime());
+        
+        // Convert the XML to binary data
+        copyXmlToBinary(state, destData);
     }
 
-    void AudioPluginAudioProcessor::setStateInformation(const void *data,
-                                                        int sizeInBytes) {
-    // You should use this method to restore your parameters from this memory
-    // block, whose contents will have been created by the getStateInformation()
-    // call.
-    juce::ignoreUnused(data, sizeInBytes);
+    void AudioPluginAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+    {
+        // Convert the binary data back to XML
+        auto state = getXmlFromBinary(data, sizeInBytes);
+        
+        if (state != nullptr)
+        {
+            // Restore the delay time
+            if (state->hasAttribute("delayTime"))
+            {
+                double delayTime = state->getDoubleAttribute("delayTime");
+                delayLine.setDelayTime(delayTime);
+            }
+        }
     }
 } // namespace audio_plugin
 

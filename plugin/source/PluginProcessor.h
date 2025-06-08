@@ -1,12 +1,21 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "DelayLine/DelayLine.h"
+
 
 namespace audio_plugin {
     class AudioPluginAudioProcessor : public juce::AudioProcessor {
     public:
     AudioPluginAudioProcessor();
     ~AudioPluginAudioProcessor() override;
+
+    // Sandbox
+    // ===============================
+    DelayLine delayLine;
+    // ===============================
+
+
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
