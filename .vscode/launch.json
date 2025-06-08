@@ -3,27 +3,57 @@
   "configurations": [
     {
       "name": "Standalone (Debug)",
-      "type": "cppvsdbg",
+      "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/plugin/${workspaceFolderBasename}_artefacts/Debug/Standalone/${workspaceFolderBasename}.exe",
       "cwd": "${workspaceFolder}",
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "preLaunchTask": "Build Standalone – Debug"
     },
     {
       "name": "Standalone (Release)",
-      "type": "cppvsdbg",
+      "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/plugin/${workspaceFolderBasename}_artefacts/Release/Standalone/${workspaceFolderBasename}.exe",
       "cwd": "${workspaceFolder}",
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "preLaunchTask": "Build Standalone – Release"
     },
     {
-      "name": "VST3, Cubase 12",
-      "type": "cppvsdbg",
+      "name": "VST3, Cubase 12 (Debug)",
+      "type": "cppdbg",
       "request": "launch",
       "program": "C:/Program Files/Steinberg/Cubase 12/Cubase12.exe",
       "cwd": "${workspaceFolder}",
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "preLaunchTask": "Build VST3 – Debug"
+    },
+    {
+      "name": "VST3, Cubase 12 (Release)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "C:/Program Files/Steinberg/Cubase 12/Cubase12.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "Build VST3 – Release"
+    },
+    {
+      "name": "VST3, Cantabile (Debug)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "C:/Program Files/Topten Software/Cantabile 4.0/Cantabile.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "Build VST3 – Debug"
+    },
+    {
+      "name": "VST3, Cantabile (Release)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "C:/Program Files/Topten Software/Cantabile 4.0/Cantabile.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "Build VST3 – Release"
     }
   ]
 }

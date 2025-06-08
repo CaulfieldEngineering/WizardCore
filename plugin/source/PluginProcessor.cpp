@@ -139,7 +139,8 @@ namespace audio_plugin {
     }
 
     juce::AudioProcessorEditor *AudioPluginAudioProcessor::createEditor() {
-    return new AudioPluginAudioProcessorEditor(*this);
+        // return new AudioPluginAudioProcessorEditor(*this);
+        return new juce::GenericAudioProcessorEditor(*this);
     }
 
     void AudioPluginAudioProcessor::getStateInformation(

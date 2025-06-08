@@ -16,6 +16,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/config.cmake)
 message(STATUS "CMakeLists.txt: Setting configuration variables.")
 project(${wPLUGIN_NAME} VERSION ${wPROJECT_VERSION})
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Always use the newest C++ standard on green-field projects if possible.
 # =====================================================================
