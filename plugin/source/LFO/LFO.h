@@ -110,6 +110,35 @@ public:
     void setSymmetry(float symmetryPercent);
 
     /**
+     * @brief Set host sync mode
+     * @param shouldSync True to sync to host tempo, false for manual frequency
+     * 
+     * When enabled, LFO frequency is calculated from host BPM and sync rate.
+     * When disabled, uses manual frequency setting.
+     * Safe to call from any thread.
+     */
+    void setSyncToHost(bool shouldSync);
+
+    /**
+     * @brief Set rhythm (musical division)
+     * @param syncRateIndex Index of rhythm (0=1/2 Note, 1=1/4 Note, 2=1/4 Triplet, 3=1/8 Note, 4=1/8 Triplet, 5=1/16 Note)
+     * 
+     * Determines the musical division for host sync mode.
+     * Safe to call from any thread.
+     */
+    void setSyncRate(int syncRateIndex);
+
+    /**
+     * @brief Update host tempo information
+     * @param bpm Host BPM (beats per minute)
+     * @param isPlaying Whether host transport is playing
+     * 
+     * Call this from processBlock to provide host timing information.
+     * Safe to call from audio thread.
+     */
+    void updateHostInfo(double bpm, bool isPlaying);
+
+    /**
      * @brief Get the next LFO sample and advance position
      * @return LFO sample value normalized to [0, 1] range scaled by depth
      * 
@@ -152,6 +181,9 @@ public:
     bool isPrepared() const { return prepared.load(); }
     bool getInvert() const { return invert.load(); }
     float getSymmetry() const { return smoothedSymmetry.getCurrentValue(); }
+    bool getSyncToHost() const { return syncToHost.load(); }
+    int getSyncRate() const { return syncRateIndex.load(); }
+    double getHostBPM() const { return hostBPM.load(); }
     double getSampleRate() const { return sampleRate.load(); }
     
     // Position access for synchronization (thread-safe)
@@ -163,6 +195,7 @@ private:
     // Internal helper methods
     void initializeWaveTable();
     void updateIncrement();
+    float calculateSyncFrequency() const;
     
     // Thread-safe parameters using atomics
     std::atomic<double> frequency{1.0};
@@ -170,6 +203,12 @@ private:
     std::atomic<double> sampleRate{44100.0};
     std::atomic<bool> prepared{false};
     std::atomic<bool> invert{false}; // Added for waveform inversion
+    
+    // Host sync parameters
+    std::atomic<bool> syncToHost{false};
+    std::atomic<int> syncRateIndex{1};  // Default to 1/4 note
+    std::atomic<double> hostBPM{120.0};
+    std::atomic<bool> hostIsPlaying{false};
     
     // Smoothed parameters to prevent clicks
     juce::SmoothedValue<float> smoothedDepth{1.0f};

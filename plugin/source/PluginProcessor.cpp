@@ -6,6 +6,19 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Static StringArray to avoid construction issues
+static juce::StringArray createRhythmOptions()
+{
+    juce::StringArray options;
+    options.add("1/2 Note");
+    options.add("1/4 Note");  
+    options.add("1/4 Triplet");
+    options.add("1/8 Note");
+    options.add("1/8 Triplet");
+    options.add("1/16 Note");
+    return options;
+}
+
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
         : AudioProcessor(
@@ -18,7 +31,7 @@ namespace audio_plugin {
     #endif
         ),
         parameters(*this, nullptr, "PARAMETERS", {
-            // LFO Parameters for testing and oscilloscope viewing
+            // Essential LFO parameters for testing
             std::make_unique<juce::AudioParameterFloat>(
                 "lfo_frequency",           // parameterID
                 "LFO Frequency",           // parameter name
@@ -32,9 +45,8 @@ namespace audio_plugin {
                 "lfo_depth",               // parameterID
                 "LFO Depth",               // parameter name
                 juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
-                1.0f,                      // default value (full depth for proper sine wave)
+                1.0f,                      // default value
                 juce::AudioParameterFloatAttributes()
-                    .withLabel("")
             ),
             
             std::make_unique<juce::AudioParameterBool>(
@@ -48,9 +60,8 @@ namespace audio_plugin {
                 "lfo_output_level",        // parameterID
                 "LFO Output Level",        // parameter name
                 juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
-                0.8f,                      // default value (80% for good oscilloscope viewing)
+                0.8f,                      // default value
                 juce::AudioParameterFloatAttributes()
-                    .withLabel("")
             ),
             
             std::make_unique<juce::AudioParameterBool>(
@@ -66,7 +77,7 @@ namespace audio_plugin {
                 juce::NormalisableRange<float>(-180.0f, 180.0f, 1.0f),
                 0.0f,                      // default value (0 degrees, center position)
                 juce::AudioParameterFloatAttributes()
-                    .withLabel("°")        // degrees symbol
+                    .withLabel("Deg.")        // degrees symbol
             ),
             
             std::make_unique<juce::AudioParameterFloat>(
@@ -76,6 +87,21 @@ namespace audio_plugin {
                 50.0f,                     // default value (50%, symmetric)
                 juce::AudioParameterFloatAttributes()
                     .withLabel("%")        // percentage symbol
+            ),
+            
+            std::make_unique<juce::AudioParameterBool>(
+                "lfo_sync_to_host",        // parameterID
+                "LFO Sync to Host",        // parameter name
+                false,                     // default value (manual frequency mode)
+                juce::AudioParameterBoolAttributes()
+            ),
+            
+            std::make_unique<juce::AudioParameterChoice>(
+                "lfo_sync_rate",           // parameterID
+                "LFO Rhythm",              // parameter name
+                createRhythmOptions(),
+                1,                         // default value (1/4 note)
+                juce::AudioParameterChoiceAttributes()
             )
         })
     {
@@ -87,8 +113,10 @@ namespace audio_plugin {
         lfoInvertParam = parameters.getRawParameterValue("lfo_invert");
         lfoPhaseOffsetParam = parameters.getRawParameterValue("lfo_phase_offset");
         lfoSymmetryParam = parameters.getRawParameterValue("lfo_symmetry");
+        lfoSyncToHostParam = parameters.getRawParameterValue("lfo_sync_to_host");
+        lfoSyncRateParam = parameters.getRawParameterValue("lfo_sync_rate");
         
-        DBG("PluginProcessor: LFO parameters initialized");
+        DBG("PluginProcessor: Essential LFO parameters initialized");
     }
 
     AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
@@ -166,6 +194,8 @@ namespace audio_plugin {
         lfo.setDepth(lfoDepthParam->load());
         lfo.setInvert(lfoInvertParam->load() > 0.5f);
         lfo.setSymmetry(lfoSymmetryParam->load());
+        lfo.setSyncToHost(lfoSyncToHostParam->load() > 0.5f);
+        lfo.setSyncRate(static_cast<int>(lfoSyncRateParam->load()));
         
         // Convert degrees to radians for phase offset
         float phaseOffsetDegrees = lfoPhaseOffsetParam->load();
@@ -229,6 +259,8 @@ namespace audio_plugin {
         bool newInvert = lfoInvertParam->load() > 0.5f;
         float newPhaseOffsetDegrees = lfoPhaseOffsetParam->load();
         float newSymmetry = lfoSymmetryParam->load();
+        bool newSyncToHost = lfoSyncToHostParam->load() > 0.5f;
+        int newSyncRate = static_cast<int>(lfoSyncRateParam->load());
         
         // Only update if values have changed
         static float lastFrequency = -1.0f;
@@ -236,6 +268,8 @@ namespace audio_plugin {
         static bool lastInvert = false;
         static float lastPhaseOffsetDegrees = -999.0f;
         static float lastSymmetry = -1.0f;
+        static bool lastSyncToHost = false;
+        static int lastSyncRate = -1;
         
         if (newFrequency != lastFrequency) {
             lfo.setFrequency(newFrequency);
@@ -264,6 +298,30 @@ namespace audio_plugin {
             lastSymmetry = newSymmetry;
         }
         
+        if (newSyncToHost != lastSyncToHost) {
+            lfo.setSyncToHost(newSyncToHost);
+            lastSyncToHost = newSyncToHost;
+        }
+
+        if (newSyncRate != lastSyncRate) {
+            lfo.setSyncRate(newSyncRate);
+            lastSyncRate = newSyncRate;
+        }
+        
+        // Get host timing information
+        juce::AudioPlayHead* playHead = getPlayHead();
+        if (playHead != nullptr) {
+            juce::AudioPlayHead::CurrentPositionInfo positionInfo;
+            if (playHead->getCurrentPosition(positionInfo)) {
+                double hostBPM = positionInfo.bpm > 0.0 ? positionInfo.bpm : 120.0;
+                bool isPlaying = positionInfo.isPlaying;
+                lfo.updateHostInfo(hostBPM, isPlaying);
+            }
+        } else {
+            // Fallback when no host available
+            lfo.updateHostInfo(120.0, true);
+        }
+        
         // Process LFO and output to audio for oscilloscope viewing
         if (lfoEnabledParam->load() > 0.5f) {
             const float outputLevel = lfoOutputLevelParam->load();
@@ -285,20 +343,6 @@ namespace audio_plugin {
                         // Output LFO signal directly (for oscilloscope viewing)
                         channelData[i] = lfoSample;
                     }
-                }
-                
-                // Debug output (every 100 samples to avoid spam)
-                static int debugCount = 0;
-                if (++debugCount % 100 == 0) {
-                    DBG("LFO pos:" << lfo.getPosition() << "\tsample:" << lfoSample);
-                }
-            }
-        } else {
-            // LFO disabled - just pass through input signal
-            if (totalNumInputChannels > 0) {
-                // Copy input to output
-                for (int ch = 0; ch < std::min(totalNumInputChannels, totalNumOutputChannels); ++ch) {
-                    buffer.copyFrom(ch, ch, 0, 0, numSamples);
                 }
             }
         }

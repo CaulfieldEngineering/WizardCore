@@ -80,6 +80,38 @@ void LFO::setSymmetry(float symmetryPercent)
     smoothedSymmetry.setTargetValue(clampedSymmetry);
 }
 
+void LFO::setSyncToHost(bool shouldSync)
+{
+    syncToHost.store(shouldSync);
+    // Recalculate increment when sync mode changes
+    if (prepared.load()) {
+        updateIncrement();
+    }
+}
+
+void LFO::setSyncRate(int syncRateIndex)
+{
+    // Clamp to valid range
+    int clampedIndex = std::clamp(syncRateIndex, 0, 5);
+    this->syncRateIndex.store(clampedIndex);
+    
+    // Recalculate increment if in sync mode
+    if (prepared.load() && syncToHost.load()) {
+        updateIncrement();
+    }
+}
+
+void LFO::updateHostInfo(double bpm, bool isPlaying)
+{
+    hostBPM.store(bpm);
+    hostIsPlaying.store(isPlaying);
+    
+    // Recalculate increment if in sync mode
+    if (prepared.load() && syncToHost.load()) {
+        updateIncrement();
+    }
+}
+
 float LFO::getNextSample()
 {
     // Early return if not prepared
@@ -161,18 +193,6 @@ float LFO::getNextSample()
         newPos -= static_cast<float>(waveTable.size());
     }
     position.store(newPos);
-    
-    // Temp Debug - Add this after calculating output, before returning:
-    static int debugCount = 0;
-    if (++debugCount % 100 == 0) {
-        DBG("LFO\t" 
-            << "pos:" << currentPos 
-            << "\tinc:" << currentIncrement 
-            << "\toffset:" << offsetPos 
-            << "\tidx:" << index1 << "." << (int)(fraction * 100)
-            << "\tout:" << output);
-    }
-
 
     return output;
 }
@@ -252,6 +272,67 @@ float LFO::getCurrentSample() const
     return output * currentDepth;
 }
 
+float LFO::calculateSyncFrequency() const
+{
+    double currentBPM = hostBPM.load();
+    int currentSyncRate = syncRateIndex.load();
+    
+    if (currentBPM <= 0.0) {
+        return 1.0f;  // Fallback frequency
+    }
+    
+    // Convert BPM to beats per second
+    float beatsPerSecond = static_cast<float>(currentBPM / 60.0);
+    
+    // Musical division multipliers (frequency = BPM/60 * multiplier)
+    const float syncRateMultipliers[] = {
+        0.5f,     // 1/2 Note    = 0.5x BPM (slower - 2 beats per cycle)
+        1.0f,     // 1/4 Note    = 1.0x BPM (normal - 1 beat per cycle)
+        1.5f,     // 1/4 Triplet = 1.5x BPM (3 triplets per 2 beats)
+        2.0f,     // 1/8 Note    = 2.0x BPM (faster - 0.5 beats per cycle)
+        3.0f,     // 1/8 Triplet = 3.0x BPM (3 triplets per beat)
+        4.0f      // 1/16 Note   = 4.0x BPM (fastest - 0.25 beats per cycle)
+    };
+    
+    float resultFreq = 1.0f;  // Fallback
+    
+    if (currentSyncRate >= 0 && currentSyncRate < 6) {
+        resultFreq = beatsPerSecond * syncRateMultipliers[currentSyncRate];
+    }
+    
+    return resultFreq;
+}
+
+void LFO::updateIncrement()
+{
+    // Calculate increment safely
+    double currentSampleRate = sampleRate.load();
+    
+    if (currentSampleRate <= 0.0 || waveTable.empty()) {
+        increment.store(0.0f);
+        return;
+    }
+    
+    float currentFrequency;
+    bool usingSyncMode = syncToHost.load();
+    
+    if (usingSyncMode) {
+        // Use host sync frequency
+        currentFrequency = calculateSyncFrequency();
+    } else {
+        // Use manual frequency
+        currentFrequency = static_cast<float>(frequency.load());
+    }
+    
+    // Calculate increment: (frequency * tableSize) / sampleRate
+    double newIncrement = (currentFrequency * waveTable.size()) / currentSampleRate;
+    
+    // Clamp to reasonable bounds to prevent overflow
+    newIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
+    
+    increment.store(static_cast<float>(newIncrement));
+}
+
 void LFO::reset()
 {
     position.store(0.0f);
@@ -319,26 +400,6 @@ void LFO::initializeWaveTable()
         // Convert [-1, +1] to [0, 1] range
         waveTable[i] = (sineValue * 0.5f) + 0.5f;
     }
-}
-
-void LFO::updateIncrement()
-{
-    // Calculate increment safely
-    double currentSampleRate = sampleRate.load();
-    double currentFrequency = frequency.load();
-    
-    if (currentSampleRate <= 0.0 || waveTable.empty()) {
-        increment.store(0.0f);
-        return;
-    }
-    
-    // Calculate increment: (frequency * tableSize) / sampleRate
-    double newIncrement = (currentFrequency * waveTable.size()) / currentSampleRate;
-    
-    // Clamp to reasonable bounds to prevent overflow
-    newIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
-    
-    increment.store(static_cast<float>(newIncrement));
 }
 
 } // namespace audio_plugin 
