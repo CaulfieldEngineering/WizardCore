@@ -1,70 +1,273 @@
 #include "DelayLine.h"
+#include <algorithm>
+#include <cmath>
 
 namespace audio_plugin {
 
 DelayLine::DelayLine()
-    : writeIndex(0)
-    , readIndex(0)
-    , sampleRate(44100.0)
-    , maxDelayInSamples(0)
-    , delayInSamples(0)
 {
 }
 
 DelayLine::~DelayLine() = default;
 
-void DelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds)
+void DelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, int newNumChannels)
 {
+    jassert(newSampleRate > 0);
+    jassert(maxDelayTimeInSeconds > 0);
+    jassert(newNumChannels > 0);
+    
     sampleRate = newSampleRate;
-    maxDelayInSamples = static_cast<int>(maxDelayTimeInSeconds * sampleRate);
+    numChannels = newNumChannels;
+    maxDelayInSamples = maxDelayTimeInSeconds * sampleRate;
     
-    // Create a buffer with 2 channels (stereo) and enough samples for the maximum delay
-    buffer.setSize(2, maxDelayInSamples);
-    buffer.clear();
+    // Add extra samples for interpolation headroom
+    bufferSize = static_cast<int>(std::ceil(maxDelayInSamples)) + 2;
     
-    writeIndex = 0;
-    readIndex = 0;
+    // Allocate per-channel buffers and indices
+    buffers.resize(numChannels);
+    writeIndices.resize(numChannels);
+    
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        buffers[ch].resize(bufferSize);
+        std::fill(buffers[ch].begin(), buffers[ch].end(), 0.0f);
+        writeIndices[ch] = 0;
+    }
+    
+    // Initialize smoothing
+    smoothedDelay.reset(sampleRate, DEFAULT_SMOOTHING_TIME);
+    smoothedDelay.setCurrentAndTargetValue(0.0);
+    targetDelayInSamples = 0.0;
+    
+    // Mark as prepared
+    prepared.store(true);
 }
 
 void DelayLine::setDelayTime(double delayTimeInSeconds)
 {
-    delayInSamples = static_cast<int>(delayTimeInSeconds * sampleRate);
+    if (!isPrepared())
+    {
+        jassertfalse;
+        return;
+    }
     
-    // Ensure delay time doesn't exceed maximum
-    delayInSamples = juce::jlimit(0, maxDelayInSamples, delayInSamples);
+    double delayInSamples = delayTimeInSeconds * sampleRate;
+    setDelayInSamples(delayInSamples);
+}
+
+void DelayLine::setDelayInSamples(double delayInSamples)
+{
+    if (!isPrepared())
+    {
+        jassertfalse;
+        return;
+    }
     
-    // Update read index
-    readIndex = writeIndex - delayInSamples;
-    if (readIndex < 0)
-        readIndex += maxDelayInSamples;
+    // Clamp to valid range
+    targetDelayInSamples = std::clamp(delayInSamples, MIN_DELAY_SAMPLES, maxDelayInSamples);
+    smoothedDelay.setTargetValue(targetDelayInSamples);
+}
+
+void DelayLine::setDelayTimeImmediate(double delayTimeInSeconds)
+{
+    if (!isPrepared())
+    {
+        jassertfalse;
+        return;
+    }
+    
+    double delayInSamples = delayTimeInSeconds * sampleRate;
+    targetDelayInSamples = std::clamp(delayInSamples, MIN_DELAY_SAMPLES, maxDelayInSamples);
+    smoothedDelay.setCurrentAndTargetValue(targetDelayInSamples);
+}
+
+void DelayLine::setSmoothingTime(double rampTimeInSeconds)
+{
+    if (!isPrepared())
+    {
+        jassertfalse;
+        return;
+    }
+    
+    smoothedDelay.reset(sampleRate, rampTimeInSeconds);
 }
 
 double DelayLine::getDelayTime() const
 {
-    return static_cast<double>(delayInSamples) / sampleRate;
+    if (sampleRate <= 0)
+        return 0.0;
+        
+    return targetDelayInSamples / sampleRate;
 }
 
-float DelayLine::process(float input)
+double DelayLine::getDelayInSamples() const
 {
-    // Write the input sample to the buffer
-    buffer.setSample(0, writeIndex, input);
-    buffer.setSample(1, writeIndex, input);
+    return targetDelayInSamples;
+}
+
+double DelayLine::getCurrentDelayInSamples() const
+{
+    return smoothedDelay.getCurrentValue();
+}
+
+void DelayLine::setInterpolationType(InterpolationType type)
+{
+    interpolationType = type;
+}
+
+DelayLine::InterpolationType DelayLine::getInterpolationType() const
+{
+    return interpolationType;
+}
+
+float DelayLine::processSample(int channel, float input)
+{
+    jassert(isPrepared());
+    jassert(channel >= 0 && channel < numChannels);
     
-    // Read the delayed sample
-    float output = buffer.getSample(0, readIndex);
+    if (interpolationType == InterpolationType::Linear)
+        return processSampleLinearInterp(channel, input);
+    else
+        return processSampleNoInterp(channel, input);
+}
+
+float DelayLine::processSampleLinearInterp(int channel, float input)
+{
+    auto& buffer = buffers[channel];
+    auto& writeIndex = writeIndices[channel];
     
-    // Update indices
-    writeIndex = (writeIndex + 1) % maxDelayInSamples;
-    readIndex = (readIndex + 1) % maxDelayInSamples;
+    // Write input to buffer
+    buffer[writeIndex] = input;
+    
+    // Get the smoothed delay value for this sample
+    double currentDelay = smoothedDelay.getNextValue();
+    
+    // Calculate the fractional read position
+    double readPos = static_cast<double>(writeIndex) - currentDelay;
+    
+    // Wrap the read position
+    while (readPos < 0.0)
+        readPos += bufferSize;
+    
+    // Get integer and fractional parts
+    int readIndex1 = static_cast<int>(readPos) % bufferSize;
+    int readIndex2 = (readIndex1 + 1) % bufferSize;
+    double fraction = readPos - std::floor(readPos);
+    
+    // Linear interpolation
+    float sample1 = buffer[readIndex1];
+    float sample2 = buffer[readIndex2];
+    float output = sample1 + fraction * (sample2 - sample1);
+    
+    // Advance write index
+    writeIndex = (writeIndex + 1) % bufferSize;
     
     return output;
 }
 
+float DelayLine::processSampleNoInterp(int channel, float input)
+{
+    auto& buffer = buffers[channel];
+    auto& writeIndex = writeIndices[channel];
+    
+    // Write input to buffer
+    buffer[writeIndex] = input;
+    
+    // Get the smoothed delay value (rounded to nearest sample)
+    int currentDelay = static_cast<int>(std::round(smoothedDelay.getNextValue()));
+    
+    // Calculate read index with wrap-around
+    int readIndex = (writeIndex - currentDelay + bufferSize) % bufferSize;
+    
+    // Read the delayed sample
+    float output = buffer[readIndex];
+    
+    // Advance write index
+    writeIndex = (writeIndex + 1) % bufferSize;
+    
+    return output;
+}
+
+void DelayLine::processBlock(juce::AudioBuffer<float>& buffer)
+{
+    jassert(isPrepared());
+    
+    const int numSamples = buffer.getNumSamples();
+    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
+    
+    // For modulation, delay time might change per sample
+    // The linear interpolation in processSample handles this smoothly
+    for (int ch = 0; ch < channelsToProcess; ++ch)
+    {
+        float* channelData = buffer.getWritePointer(ch);
+        
+        for (int i = 0; i < numSamples; ++i)
+        {
+            channelData[i] = processSample(ch, channelData[i]);
+        }
+    }
+}
+
+void DelayLine::processBlock(juce::AudioBuffer<float>& buffer, float dryWetMix)
+{
+    jassert(isPrepared());
+    jassert(dryWetMix >= 0.0f && dryWetMix <= 1.0f);
+    
+    const int numSamples = buffer.getNumSamples();
+    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
+    
+    const float wetGain = dryWetMix;
+    const float dryGain = 1.0f - dryWetMix;
+    
+    // Process with dry/wet mix
+    // Note: For modulation effects, setDelayTime() can be called before or during
+    // this process, and linear interpolation ensures smooth transitions
+    for (int ch = 0; ch < channelsToProcess; ++ch)
+    {
+        float* channelData = buffer.getWritePointer(ch);
+        
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float dry = channelData[i];
+            float wet = processSample(ch, dry);
+            channelData[i] = dry * dryGain + wet * wetGain;
+        }
+    }
+}
+
 void DelayLine::clear()
 {
-    buffer.clear();
-    writeIndex = 0;
-    readIndex = 0;
+    for (auto& buffer : buffers)
+    {
+        std::fill(buffer.begin(), buffer.end(), 0.0f);
+    }
+    
+    std::fill(writeIndices.begin(), writeIndices.end(), 0);
+    
+    // Don't reset the delay time - just clear the buffers
+}
+
+bool DelayLine::isPrepared() const
+{
+    return prepared.load();
+}
+
+double DelayLine::getMaxDelayTime() const
+{
+    if (sampleRate <= 0)
+        return 0.0;
+        
+    return maxDelayInSamples / sampleRate;
+}
+
+int DelayLine::getMaxDelayInSamples() const
+{
+    return static_cast<int>(maxDelayInSamples);
+}
+
+double DelayLine::getSampleRate() const
+{
+    return sampleRate;
 }
 
 } // namespace audio_plugin

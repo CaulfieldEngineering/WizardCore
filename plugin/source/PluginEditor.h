@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include <juce_gui_basics/juce_gui_basics.h>
 
 namespace audio_plugin {
 
@@ -16,6 +17,10 @@ namespace audio_plugin {
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     AudioPluginAudioProcessor &processorRef;
+
+    juce::Slider delayTimeSlider;
+
+    void sliderValueChanged(juce::Slider* slider);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessorEditor)
     };

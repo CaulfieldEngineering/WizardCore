@@ -107,6 +107,8 @@ target_link_libraries(${PROJECT_NAME}
 	    ${PROJECT_NAME}BinaryData
         juce::juce_audio_utils
 	    juce::juce_dsp
+        juce::juce_audio_basics
+        juce::juce_core
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
