@@ -70,6 +70,9 @@ private:
 	std::atomic<float>* lfoDepthParam = nullptr;
 	std::atomic<float>* lfoEnabledParam = nullptr;
 	std::atomic<float>* lfoOutputLevelParam = nullptr;
+	std::atomic<float>* lfoInvertParam = nullptr;
+	std::atomic<float>* lfoPhaseOffsetParam = nullptr;
+	std::atomic<float>* lfoSymmetryParam = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

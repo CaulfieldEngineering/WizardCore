@@ -98,6 +98,18 @@ public:
     void setInvert(bool shouldInvert);
 
     /**
+     * @brief Set waveform symmetry
+     * @param symmetryPercent Symmetry percentage (10.0 to 90.0)
+     * 
+     * Controls the time distribution of the waveform period:
+     * - 50%: Normal symmetric waveform
+     * - <50%: First half compressed, second half expanded
+     * - >50%: First half expanded, second half compressed
+     * Safe to call from any thread.
+     */
+    void setSymmetry(float symmetryPercent);
+
+    /**
      * @brief Get the next LFO sample and advance position
      * @return LFO sample value normalized to [0, 1] range scaled by depth
      * 
@@ -139,6 +151,7 @@ public:
     WaveformType getWaveformType() const { return WaveformType::Sine; }
     bool isPrepared() const { return prepared.load(); }
     bool getInvert() const { return invert.load(); }
+    float getSymmetry() const { return smoothedSymmetry.getCurrentValue(); }
     double getSampleRate() const { return sampleRate.load(); }
     
     // Position access for synchronization (thread-safe)
@@ -158,8 +171,9 @@ private:
     std::atomic<bool> prepared{false};
     std::atomic<bool> invert{false}; // Added for waveform inversion
     
-    // Smoothed depth parameter to prevent clicks
+    // Smoothed parameters to prevent clicks
     juce::SmoothedValue<float> smoothedDepth{1.0f};
+    juce::SmoothedValue<float> smoothedSymmetry{0.5f};
     
     // Wavetable data (only modified during prepare())
     std::vector<float> waveTable;

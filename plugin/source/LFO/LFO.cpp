@@ -24,9 +24,12 @@ void LFO::prepare(double newSampleRate)
     // Update sample rate atomically
     sampleRate.store(newSampleRate);
     
-    // Initialize smoothed depth with reasonable smoothing time (50ms)
+    // Initialize smoothed parameters with reasonable smoothing time (50ms)
     smoothedDepth.reset(newSampleRate, 0.05);
     smoothedDepth.setCurrentAndTargetValue(1.0f);
+    
+    smoothedSymmetry.reset(newSampleRate, 0.05);
+    smoothedSymmetry.setCurrentAndTargetValue(0.5f);
     
     // Initialize wavetable (thread-safe as it's only called during prepare)
     initializeWaveTable();
@@ -64,6 +67,19 @@ void LFO::setPhaseOffset(double phaseOffsetInRadians)
     phaseOffset.store(phaseOffsetInRadians);
 }
 
+void LFO::setInvert(bool shouldInvert)
+{
+    // Store invert flag atomically
+    invert.store(shouldInvert);
+}
+
+void LFO::setSymmetry(float symmetryPercent)
+{
+    // Clamp symmetry to valid range and convert to 0.0-1.0 range
+    float clampedSymmetry = std::clamp(symmetryPercent, 10.0f, 90.0f) / 100.0f;
+    smoothedSymmetry.setTargetValue(clampedSymmetry);
+}
+
 float LFO::getNextSample()
 {
     // Early return if not prepared
@@ -76,6 +92,8 @@ float LFO::getNextSample()
     float currentIncrement = increment.load();
     float currentDepth = smoothedDepth.getNextValue();
     double currentPhaseOffset = phaseOffset.load();
+    bool currentInvert = invert.load();
+    float currentSymmetry = smoothedSymmetry.getNextValue();
     
     // Apply phase offset to position
     float offsetPos = currentPos + static_cast<float>((currentPhaseOffset / TWO_PI) * waveTable.size());
@@ -88,10 +106,37 @@ float LFO::getNextSample()
         offsetPos += static_cast<float>(waveTable.size());
     }
     
+    // Apply symmetry transformation
+    float symmetryPos = offsetPos;
+    if (currentSymmetry != 0.5f) {
+        float normalizedPos = offsetPos / static_cast<float>(waveTable.size()); // [0, 1]
+        float remappedPos;
+        
+        // Symmetry determines the crossover point (where first half ends)
+        // 10% = first half compressed to 10% of period, second half gets 90%
+        // 90% = first half expanded to 90% of period, second half gets 10%
+        
+        if (normalizedPos < currentSymmetry) {
+            // First half of the waveform: map [0, symmetry] back to [0, 0.5] of sine wave
+            remappedPos = (normalizedPos / currentSymmetry) * 0.5f;
+        } else {
+            // Second half of the waveform: map [symmetry, 1.0] back to [0.5, 1.0] of sine wave
+            remappedPos = ((normalizedPos - currentSymmetry) / (1.0f - currentSymmetry)) * 0.5f + 0.5f;
+        }
+        
+        // Convert back to wavetable position
+        symmetryPos = remappedPos * static_cast<float>(waveTable.size());
+        
+        // Ensure we stay within bounds
+        if (symmetryPos >= static_cast<float>(waveTable.size())) {
+            symmetryPos = static_cast<float>(waveTable.size()) - 1.0f;
+        }
+    }
+    
     // Simple wavetable lookup with linear interpolation
-    int index1 = static_cast<int>(offsetPos);
+    int index1 = static_cast<int>(symmetryPos);
     int index2 = (index1 + 1) % static_cast<int>(waveTable.size());
-    float fraction = offsetPos - static_cast<float>(index1);
+    float fraction = symmetryPos - static_cast<float>(index1);
     
     // Bounds safety
     if (index1 >= static_cast<int>(waveTable.size())) index1 = 0;
@@ -101,6 +146,11 @@ float LFO::getNextSample()
     float sample1 = waveTable[index1];
     float sample2 = waveTable[index2];
     float output = sample1 + fraction * (sample2 - sample1);
+    
+    // Apply inversion if enabled (flip within [0,1] range)
+    if (currentInvert) {
+        output = 1.0f - output;
+    }
     
     // Apply depth scaling
     output *= currentDepth;
@@ -138,6 +188,8 @@ float LFO::getCurrentSample() const
     float currentPos = position.load();
     float currentDepth = smoothedDepth.getCurrentValue();
     double currentPhaseOffset = phaseOffset.load();
+    bool currentInvert = invert.load();
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
     
     // Apply phase offset to position
     float offsetPos = currentPos + static_cast<float>((currentPhaseOffset / TWO_PI) * waveTable.size());
@@ -150,10 +202,37 @@ float LFO::getCurrentSample() const
         offsetPos += static_cast<float>(waveTable.size());
     }
     
+    // Apply symmetry transformation
+    float symmetryPos = offsetPos;
+    if (currentSymmetry != 0.5f) {
+        float normalizedPos = offsetPos / static_cast<float>(waveTable.size()); // [0, 1]
+        float remappedPos;
+        
+        // Symmetry determines the crossover point (where first half ends)
+        // 10% = first half compressed to 10% of period, second half gets 90%
+        // 90% = first half expanded to 90% of period, second half gets 10%
+        
+        if (normalizedPos < currentSymmetry) {
+            // First half of the waveform: map [0, symmetry] back to [0, 0.5] of sine wave
+            remappedPos = (normalizedPos / currentSymmetry) * 0.5f;
+        } else {
+            // Second half of the waveform: map [symmetry, 1.0] back to [0.5, 1.0] of sine wave
+            remappedPos = ((normalizedPos - currentSymmetry) / (1.0f - currentSymmetry)) * 0.5f + 0.5f;
+        }
+        
+        // Convert back to wavetable position
+        symmetryPos = remappedPos * static_cast<float>(waveTable.size());
+        
+        // Ensure we stay within bounds
+        if (symmetryPos >= static_cast<float>(waveTable.size())) {
+            symmetryPos = static_cast<float>(waveTable.size()) - 1.0f;
+        }
+    }
+    
     // Simple wavetable lookup with linear interpolation
-    int index1 = static_cast<int>(offsetPos);
+    int index1 = static_cast<int>(symmetryPos);
     int index2 = (index1 + 1) % static_cast<int>(waveTable.size());
-    float fraction = offsetPos - static_cast<float>(index1);
+    float fraction = symmetryPos - static_cast<float>(index1);
     
     // Bounds safety
     if (index1 >= static_cast<int>(waveTable.size())) index1 = 0;
@@ -163,6 +242,11 @@ float LFO::getCurrentSample() const
     float sample1 = waveTable[index1];
     float sample2 = waveTable[index2];
     float output = sample1 + fraction * (sample2 - sample1);
+    
+    // Apply inversion if enabled (flip within [0,1] range)
+    if (currentInvert) {
+        output = 1.0f - output;
+    }
     
     // Apply depth scaling
     return output * currentDepth;

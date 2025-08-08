@@ -1,6 +1,11 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+// Ensure M_PI is defined
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
         : AudioProcessor(
@@ -46,6 +51,31 @@ namespace audio_plugin {
                 0.8f,                      // default value (80% for good oscilloscope viewing)
                 juce::AudioParameterFloatAttributes()
                     .withLabel("")
+            ),
+            
+            std::make_unique<juce::AudioParameterBool>(
+                "lfo_invert",              // parameterID
+                "LFO Invert",              // parameter name
+                false,                     // default value (not inverted)
+                juce::AudioParameterBoolAttributes()
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "lfo_phase_offset",        // parameterID
+                "LFO Phase Offset",        // parameter name
+                juce::NormalisableRange<float>(-180.0f, 180.0f, 1.0f),
+                0.0f,                      // default value (0 degrees, center position)
+                juce::AudioParameterFloatAttributes()
+                    .withLabel("°")        // degrees symbol
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "lfo_symmetry",            // parameterID
+                "LFO Symmetry",            // parameter name
+                juce::NormalisableRange<float>(10.0f, 90.0f, 1.0f),
+                50.0f,                     // default value (50%, symmetric)
+                juce::AudioParameterFloatAttributes()
+                    .withLabel("%")        // percentage symbol
             )
         })
     {
@@ -54,6 +84,9 @@ namespace audio_plugin {
         lfoDepthParam = parameters.getRawParameterValue("lfo_depth");
         lfoEnabledParam = parameters.getRawParameterValue("lfo_enabled");
         lfoOutputLevelParam = parameters.getRawParameterValue("lfo_output_level");
+        lfoInvertParam = parameters.getRawParameterValue("lfo_invert");
+        lfoPhaseOffsetParam = parameters.getRawParameterValue("lfo_phase_offset");
+        lfoSymmetryParam = parameters.getRawParameterValue("lfo_symmetry");
         
         DBG("PluginProcessor: LFO parameters initialized");
     }
@@ -131,6 +164,13 @@ namespace audio_plugin {
         // Set initial LFO parameters
         lfo.setFrequency(lfoFrequencyParam->load());
         lfo.setDepth(lfoDepthParam->load());
+        lfo.setInvert(lfoInvertParam->load() > 0.5f);
+        lfo.setSymmetry(lfoSymmetryParam->load());
+        
+        // Convert degrees to radians for phase offset
+        float phaseOffsetDegrees = lfoPhaseOffsetParam->load();
+        float phaseOffsetRadians = phaseOffsetDegrees * (M_PI / 180.0f);
+        lfo.setPhaseOffset(phaseOffsetRadians);
         
         DBG("Plugin prepared successfully with LFO");
     }
@@ -186,10 +226,16 @@ namespace audio_plugin {
         // Update LFO parameters from UI (only when they change)
         float newFrequency = lfoFrequencyParam->load();
         float newDepth = lfoDepthParam->load();
+        bool newInvert = lfoInvertParam->load() > 0.5f;
+        float newPhaseOffsetDegrees = lfoPhaseOffsetParam->load();
+        float newSymmetry = lfoSymmetryParam->load();
         
         // Only update if values have changed
         static float lastFrequency = -1.0f;
         static float lastDepth = -1.0f;
+        static bool lastInvert = false;
+        static float lastPhaseOffsetDegrees = -999.0f;
+        static float lastSymmetry = -1.0f;
         
         if (newFrequency != lastFrequency) {
             lfo.setFrequency(newFrequency);
@@ -199,6 +245,23 @@ namespace audio_plugin {
         if (newDepth != lastDepth) {
             lfo.setDepth(newDepth);
             lastDepth = newDepth;
+        }
+        
+        if (newInvert != lastInvert) {
+            lfo.setInvert(newInvert);
+            lastInvert = newInvert;
+        }
+        
+        if (newPhaseOffsetDegrees != lastPhaseOffsetDegrees) {
+            // Convert degrees to radians
+            float phaseOffsetRadians = newPhaseOffsetDegrees * (M_PI / 180.0f);
+            lfo.setPhaseOffset(phaseOffsetRadians);
+            lastPhaseOffsetDegrees = newPhaseOffsetDegrees;
+        }
+        
+        if (newSymmetry != lastSymmetry) {
+            lfo.setSymmetry(newSymmetry);
+            lastSymmetry = newSymmetry;
         }
         
         // Process LFO and output to audio for oscilloscope viewing
