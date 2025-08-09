@@ -202,6 +202,12 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 - **Precision**: Double-precision phase accumulation
 - **Continuity**: Smooth transitions during parameter changes
 
+## Open Issues
+- Add remaining waveforms
+- Alternating between Sync and Frequency needs testing (needs to retain frequency value)
+- Changing host tempo needs testing
+- Parameter smoothing needs optimization (slider is faster than smoothing values)
+
 ## Dependencies
 - **JUCE**: Audio processing framework
 - **C++17**: Standard library features (std::clamp, etc.)

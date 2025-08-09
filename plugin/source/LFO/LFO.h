@@ -220,7 +220,7 @@ private:
     std::atomic<float> increment{0.0f};
     
     // Constants
-    static constexpr double MIN_FREQUENCY = 0.01;    // Lower minimum for stability
+    static constexpr double MIN_FREQUENCY = 0.001;   // Much lower minimum for very slow LFOs (like half notes)
     static constexpr double MAX_FREQUENCY = 1000.0;    // Higher maximum for flexibility
     static constexpr double TWO_PI = 2.0 * M_PI;
     static constexpr int DEFAULT_WAVETABLE_SIZE = 1024;  // Fixed size for predictability

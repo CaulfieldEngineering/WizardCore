@@ -260,7 +260,19 @@ namespace audio_plugin {
         float newPhaseOffsetDegrees = lfoPhaseOffsetParam->load();
         float newSymmetry = lfoSymmetryParam->load();
         bool newSyncToHost = lfoSyncToHostParam->load() > 0.5f;
-        int newSyncRate = static_cast<int>(lfoSyncRateParam->load());
+        float rawSyncRate = lfoSyncRateParam->load();
+        int newSyncRate = static_cast<int>(rawSyncRate);
+        
+        // Debug parameter values every 1000 samples to avoid spam, but always show sync rate changes
+        static int debugCounter = 0;
+        static float lastRawSyncRate = -999.0f;
+        
+        if (++debugCounter % 1000 == 0 || rawSyncRate != lastRawSyncRate) {
+            DBG("Parameters: Freq=" << newFrequency << "Hz, Depth=" << newDepth 
+                << ", SyncToHost=" << (newSyncToHost ? "true" : "false") << ", RawSyncRate=" << rawSyncRate 
+                << ", IntSyncRate=" << newSyncRate);
+            lastRawSyncRate = rawSyncRate;
+        }
         
         // Only update if values have changed
         static float lastFrequency = -1.0f;
@@ -270,6 +282,7 @@ namespace audio_plugin {
         static float lastSymmetry = -1.0f;
         static bool lastSyncToHost = false;
         static int lastSyncRate = -1;
+        static bool firstRun = true;
         
         if (newFrequency != lastFrequency) {
             lfo.setFrequency(newFrequency);
@@ -298,15 +311,23 @@ namespace audio_plugin {
             lastSymmetry = newSymmetry;
         }
         
-        if (newSyncToHost != lastSyncToHost) {
+        if (newSyncToHost != lastSyncToHost || firstRun) {
             lfo.setSyncToHost(newSyncToHost);
             lastSyncToHost = newSyncToHost;
         }
 
-        if (newSyncRate != lastSyncRate) {
+        // Always log sync rate for debugging
+        DBG("PluginProcessor: Checking sync rate - Current=" << newSyncRate << ", Last=" << lastSyncRate << ", FirstRun=" << (firstRun ? "true" : "false"));
+        
+        if (newSyncRate != lastSyncRate || firstRun) {
+            DBG("PluginProcessor: Sync rate parameter changed from " << lastSyncRate << " to " << newSyncRate);
             lfo.setSyncRate(newSyncRate);
             lastSyncRate = newSyncRate;
+        } else {
+            DBG("PluginProcessor: Sync rate unchanged, not updating LFO");
         }
+        
+        firstRun = false;
         
         // Get host timing information
         juce::AudioPlayHead* playHead = getPlayHead();

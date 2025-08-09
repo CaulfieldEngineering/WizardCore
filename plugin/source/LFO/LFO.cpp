@@ -93,11 +93,29 @@ void LFO::setSyncRate(int syncRateIndex)
 {
     // Clamp to valid range
     int clampedIndex = std::clamp(syncRateIndex, 0, 5);
+    int oldIndex = this->syncRateIndex.load();
+    
+    // Debug output - always show what we're trying to set
+    const char* syncNames[] = {"1/2 Note", "1/4 Note", "1/4 Triplet", "1/8 Note", "1/8 Triplet", "1/16 Note"};
+    DBG("LFO setSyncRate called: requested=" << syncRateIndex << ", clamped=" << clampedIndex 
+        << " (" << syncNames[clampedIndex] << "), current=" << oldIndex);
+    
     this->syncRateIndex.store(clampedIndex);
+    
+    // Debug output when sync rate changes
+    if (oldIndex != clampedIndex) {
+        DBG("LFO Sync Rate changed from " << oldIndex << " (" << syncNames[oldIndex] << ") to " 
+            << clampedIndex << " (" << syncNames[clampedIndex] << ")");
+    } else {
+        DBG("LFO Sync Rate unchanged at " << clampedIndex << " (" << syncNames[clampedIndex] << ")");
+    }
     
     // Recalculate increment if in sync mode
     if (prepared.load() && syncToHost.load()) {
+        DBG("LFO setSyncRate: Calling updateIncrement (sync mode active)");
         updateIncrement();
+    } else {
+        DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << prepared.load() << ", syncToHost=" << syncToHost.load() << ")");
     }
 }
 
@@ -297,7 +315,15 @@ float LFO::calculateSyncFrequency() const
     float resultFreq = 1.0f;  // Fallback
     
     if (currentSyncRate >= 0 && currentSyncRate < 6) {
+        const char* syncNames[] = {"1/2 Note", "1/4 Note", "1/4 Triplet", "1/8 Note", "1/8 Triplet", "1/16 Note"};
         resultFreq = beatsPerSecond * syncRateMultipliers[currentSyncRate];
+        
+        // Debug output to track sync frequency calculations
+        DBG("LFO Sync: BPM=" << currentBPM << ", SyncRateIndex=" << currentSyncRate 
+            << " (" << syncNames[currentSyncRate] << "), Multiplier=" << syncRateMultipliers[currentSyncRate] 
+            << ", BeatsPerSec=" << beatsPerSecond << ", ResultFreq=" << resultFreq << "Hz");
+    } else {
+        DBG("LFO Sync: Invalid sync rate index " << currentSyncRate << ", using fallback");
     }
     
     return resultFreq;
@@ -317,20 +343,29 @@ void LFO::updateIncrement()
     bool usingSyncMode = syncToHost.load();
     
     if (usingSyncMode) {
-        // Use host sync frequency
-        currentFrequency = calculateSyncFrequency();
+        // Use host sync frequency and apply the same clamping as manual frequency
+        float rawSyncFreq = calculateSyncFrequency();
+        currentFrequency = std::clamp(rawSyncFreq, static_cast<float>(MIN_FREQUENCY), static_cast<float>(MAX_FREQUENCY));
+        
+        DBG("LFO updateIncrement: Sync mode - Raw=" << rawSyncFreq << "Hz, Clamped=" << currentFrequency << "Hz");
     } else {
         // Use manual frequency
         currentFrequency = static_cast<float>(frequency.load());
+        
+        DBG("LFO updateIncrement: Manual mode - Frequency=" << currentFrequency << "Hz");
     }
     
     // Calculate increment: (frequency * tableSize) / sampleRate
     double newIncrement = (currentFrequency * waveTable.size()) / currentSampleRate;
     
     // Clamp to reasonable bounds to prevent overflow
-    newIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
+    double clampedIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
     
-    increment.store(static_cast<float>(newIncrement));
+    DBG("LFO increment: Freq=" << currentFrequency << "Hz, TableSize=" << waveTable.size() 
+        << ", SampleRate=" << currentSampleRate << ", RawIncrement=" << newIncrement 
+        << ", ClampedIncrement=" << clampedIncrement);
+    
+    increment.store(static_cast<float>(clampedIncrement));
 }
 
 void LFO::reset()
