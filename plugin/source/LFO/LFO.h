@@ -38,7 +38,13 @@ public:
      * @brief Waveform types supported by the LFO
      */
     enum class WaveformType {
-        Sine = 0    ///< Sine wave (default and only supported type)
+        Sine = 0,      ///< Sine wave (default)
+        RampDown,      ///< Ramp down waveform
+        RampUp,        ///< Ramp up waveform  
+        Square,        ///< Square wave with rounded corners
+        Triangle,      ///< Triangle wave
+        HumpDown,      ///< U-shaped waveform (hump down)
+        HumpUp         ///< Inverted U-shaped waveform (hump up)
     };
 
     /**
@@ -110,6 +116,16 @@ public:
     void setSymmetry(float symmetryPercent);
 
     /**
+     * @brief Set the waveshape type
+     * @param waveshape The waveshape type to use
+     * 
+     * Changes the LFO waveform shape. The wavetable will be regenerated
+     * to match the selected waveshape while maintaining current symmetry settings.
+     * Safe to call from any thread.
+     */
+    void setWaveShape(WaveformType waveshape);
+
+    /**
      * @brief Set host sync mode
      * @param shouldSync True to sync to host tempo, false for manual frequency
      * 
@@ -137,6 +153,19 @@ public:
      * Safe to call from audio thread.
      */
     void updateHostInfo(double bpm, bool isPlaying);
+
+    /**
+     * @brief Update host tempo and beat position information
+     * @param bpm Host BPM (beats per minute)
+     * @param isPlaying Whether host transport is playing
+     * @param beatPosition Current beat position (0.0 = downbeat, 1.0 = next downbeat)
+     * @param ppqPosition Current PPQ (Pulses Per Quarter) position
+     * 
+     * Call this from processBlock to provide host timing and beat position information.
+     * This enables downbeat locking when sync mode is active.
+     * Safe to call from audio thread.
+     */
+    void updateHostInfo(double bpm, bool isPlaying, double beatPosition, double ppqPosition);
 
     /**
      * @brief Get the next LFO sample and advance position
@@ -177,7 +206,7 @@ public:
     double getFrequency() const { return frequency.load(); }
     float getDepth() const { return smoothedDepth.getCurrentValue(); }
     double getPhaseOffset() const { return phaseOffset.load(); }
-    WaveformType getWaveformType() const { return WaveformType::Sine; }
+    WaveformType getWaveformType() const { return waveShape.load(); }
     bool isPrepared() const { return prepared.load(); }
     bool getInvert() const { return invert.load(); }
     float getSymmetry() const { return smoothedSymmetry.getCurrentValue(); }
@@ -185,6 +214,15 @@ public:
     int getSyncRate() const { return syncRateIndex.load(); }
     double getHostBPM() const { return hostBPM.load(); }
     double getSampleRate() const { return sampleRate.load(); }
+    double getHostBeatPosition() const { return hostBeatPosition.load(); }
+    double getHostPPQPosition() const { return hostPPQPosition.load(); }
+    bool isDownbeatDetected() const { return downbeatDetected.load(); }
+    
+    /**
+     * @brief Get the current waveshape name as a string
+     * @return String representation of the current waveshape
+     */
+    juce::String getWaveShapeName() const;
     
     // Position access for synchronization (thread-safe)
     float getPosition() const;
@@ -196,6 +234,16 @@ private:
     void initializeWaveTable();
     void updateIncrement();
     float calculateSyncFrequency() const;
+    void checkForDownbeatLock(double currentTime);
+    
+    // Waveshape generation methods
+    void generateSineWave();
+    void generateRampDownWave();
+    void generateRampUpWave();
+    void generateSquareWave();
+    void generateTriangleWave();
+    void generateHumpDownWave();
+    void generateHumpUpWave();
     
     // Thread-safe parameters using atomics
     std::atomic<double> frequency{1.0};
@@ -203,12 +251,19 @@ private:
     std::atomic<double> sampleRate{44100.0};
     std::atomic<bool> prepared{false};
     std::atomic<bool> invert{false}; // Added for waveform inversion
+    std::atomic<WaveformType> waveShape{WaveformType::Sine}; // Current waveshape
     
     // Host sync parameters
     std::atomic<bool> syncToHost{false};
     std::atomic<int> syncRateIndex{1};  // Default to 1/4 note
     std::atomic<double> hostBPM{120.0};
     std::atomic<bool> hostIsPlaying{false};
+    
+    // Beat position tracking for downbeat locking
+    std::atomic<double> hostBeatPosition{0.0};
+    std::atomic<double> hostPPQPosition{0.0};
+    std::atomic<double> lastDownbeatTime{0.0};
+    std::atomic<bool> downbeatDetected{false};
     
     // Smoothed parameters to prevent clicks
     juce::SmoothedValue<float> smoothedDepth{1.0f};

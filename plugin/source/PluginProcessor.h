@@ -75,6 +75,7 @@ private:
 	std::atomic<float>* lfoSymmetryParam = nullptr;
 	std::atomic<float>* lfoSyncToHostParam = nullptr;
 	std::atomic<float>* lfoSyncRateParam = nullptr;
+	std::atomic<float>* lfoWaveshapeParam = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

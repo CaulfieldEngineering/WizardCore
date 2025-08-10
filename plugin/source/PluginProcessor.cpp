@@ -102,6 +102,14 @@ namespace audio_plugin {
                 createRhythmOptions(),
                 1,                         // default value (1/4 note)
                 juce::AudioParameterChoiceAttributes()
+            ),
+            
+            std::make_unique<juce::AudioParameterChoice>(
+                "lfo_waveshape",           // parameterID
+                "LFO Waveshape",           // parameter name
+                juce::StringArray{"Sine", "Ramp Down", "Ramp Up", "Square", "Triangle", "Hump Down", "Hump Up"},
+                0,                         // default value (Sine)
+                juce::AudioParameterChoiceAttributes()
             )
         })
     {
@@ -115,6 +123,7 @@ namespace audio_plugin {
         lfoSymmetryParam = parameters.getRawParameterValue("lfo_symmetry");
         lfoSyncToHostParam = parameters.getRawParameterValue("lfo_sync_to_host");
         lfoSyncRateParam = parameters.getRawParameterValue("lfo_sync_rate");
+        lfoWaveshapeParam = parameters.getRawParameterValue("lfo_waveshape");
         
         DBG("PluginProcessor: Essential LFO parameters initialized");
     }
@@ -197,6 +206,10 @@ namespace audio_plugin {
         lfo.setSyncToHost(lfoSyncToHostParam->load() > 0.5f);
         lfo.setSyncRate(static_cast<int>(lfoSyncRateParam->load()));
         
+        // Set initial waveshape
+        int waveshapeIndex = static_cast<int>(lfoWaveshapeParam->load());
+        lfo.setWaveShape(static_cast<audio_plugin::LFO::WaveformType>(waveshapeIndex));
+        
         // Convert degrees to radians for phase offset
         float phaseOffsetDegrees = lfoPhaseOffsetParam->load();
         float phaseOffsetRadians = phaseOffsetDegrees * (M_PI / 180.0f);
@@ -262,6 +275,8 @@ namespace audio_plugin {
         bool newSyncToHost = lfoSyncToHostParam->load() > 0.5f;
         float rawSyncRate = lfoSyncRateParam->load();
         int newSyncRate = static_cast<int>(rawSyncRate);
+        float rawWaveshape = lfoWaveshapeParam->load();
+        int newWaveshape = static_cast<int>(rawWaveshape);
         
         // Debug parameter values every 1000 samples to avoid spam, but always show sync rate changes
         static int debugCounter = 0;
@@ -282,6 +297,7 @@ namespace audio_plugin {
         static float lastSymmetry = -1.0f;
         static bool lastSyncToHost = false;
         static int lastSyncRate = -1;
+        static int lastWaveshape = -1;
         static bool firstRun = true;
         
         if (newFrequency != lastFrequency) {
@@ -325,6 +341,12 @@ namespace audio_plugin {
             lastSyncRate = newSyncRate;
         } else {
             DBG("PluginProcessor: Sync rate unchanged, not updating LFO");
+        }
+        
+        if (newWaveshape != lastWaveshape || firstRun) {
+            DBG("PluginProcessor: Waveshape parameter changed from " << lastWaveshape << " to " << newWaveshape);
+            lfo.setWaveShape(static_cast<audio_plugin::LFO::WaveformType>(newWaveshape));
+            lastWaveshape = newWaveshape;
         }
         
         firstRun = false;

@@ -2,6 +2,11 @@
 #include <algorithm>
 #include <cmath>
 
+// Ensure M_PI is defined if not already defined
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace audio_plugin {
 
 LFO::LFO()
@@ -40,6 +45,10 @@ void LFO::prepare(double newSampleRate)
     
     // Mark as prepared
     prepared.store(true);
+    
+    // Reset downbeat tracking
+    downbeatDetected.store(false);
+    lastDownbeatTime.store(0.0);
 }
 
 void LFO::setFrequency(double frequencyInHz)
@@ -71,6 +80,12 @@ void LFO::setInvert(bool shouldInvert)
 {
     // Store invert flag atomically
     invert.store(shouldInvert);
+    
+    // Regenerate wavetable if prepared, since inversion affects the waveshape
+    if (prepared.load()) {
+        initializeWaveTable();
+        DBG("LFO Invert changed to " << (shouldInvert ? "true" : "false") << ", wavetable regenerated");
+    }
 }
 
 void LFO::setSymmetry(float symmetryPercent)
@@ -80,9 +95,28 @@ void LFO::setSymmetry(float symmetryPercent)
     smoothedSymmetry.setTargetValue(clampedSymmetry);
 }
 
+void LFO::setWaveShape(WaveformType waveshape)
+{
+    waveShape.store(waveshape);
+    
+    // Regenerate wavetable if prepared
+    if (prepared.load()) {
+        initializeWaveTable();
+        DBG("LFO WaveShape changed to " << static_cast<int>(waveshape) << ", wavetable regenerated");
+    }
+}
+
 void LFO::setSyncToHost(bool shouldSync)
 {
     syncToHost.store(shouldSync);
+    
+    // Reset downbeat tracking when sync mode changes
+    if (shouldSync) {
+        downbeatDetected.store(false);
+        lastDownbeatTime.store(0.0);
+        DBG("LFO Sync mode enabled - downbeat tracking reset");
+    }
+    
     // Recalculate increment when sync mode changes
     if (prepared.load()) {
         updateIncrement();
@@ -115,7 +149,7 @@ void LFO::setSyncRate(int syncRateIndex)
         DBG("LFO setSyncRate: Calling updateIncrement (sync mode active)");
         updateIncrement();
     } else {
-        DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << prepared.load() << ", syncToHost=" << syncToHost.load() << ")");
+        DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << (prepared.load() ? "true" : "false") << ", syncToHost=" << (syncToHost.load() ? "true" : "false") << ")");
     }
 }
 
@@ -126,6 +160,25 @@ void LFO::updateHostInfo(double bpm, bool isPlaying)
     
     // Recalculate increment if in sync mode
     if (prepared.load() && syncToHost.load()) {
+        updateIncrement();
+    }
+}
+
+void LFO::updateHostInfo(double bpm, bool isPlaying, double beatPosition, double ppqPosition)
+{
+    // Store host information
+    hostBPM.store(bpm);
+    hostIsPlaying.store(isPlaying);
+    hostBeatPosition.store(beatPosition);
+    hostPPQPosition.store(ppqPosition);
+    
+    // Check for downbeat locking if in sync mode
+    if (prepared.load() && syncToHost.load() && isPlaying) {
+        // Calculate current time based on BPM and PPQ position
+        double beatsPerSecond = bpm / 60.0;
+        double currentTime = ppqPosition / beatsPerSecond;
+        
+        checkForDownbeatLock(currentTime);
         updateIncrement();
     }
 }
@@ -198,9 +251,9 @@ float LFO::getNextSample()
     float output = sample1 + fraction * (sample2 - sample1);
     
     // Apply inversion if enabled (flip within [0,1] range)
-    if (currentInvert) {
-        output = 1.0f - output;
-    }
+    //if (currentInvert) {
+    //    output = 1.0f - output;
+    //}
     
     // Apply depth scaling
     output *= currentDepth;
@@ -282,9 +335,9 @@ float LFO::getCurrentSample() const
     float output = sample1 + fraction * (sample2 - sample1);
     
     // Apply inversion if enabled (flip within [0,1] range)
-    if (currentInvert) {
-        output = 1.0f - output;
-    }
+    //if (currentInvert) {
+    //    output = 1.0f - output;
+    //}
     
     // Apply depth scaling
     return output * currentDepth;
@@ -416,6 +469,30 @@ int LFO::getWaveTableSize() const
     return static_cast<int>(waveTable.size());
 }
 
+juce::String LFO::getWaveShapeName() const
+{
+    WaveformType currentShape = waveShape.load();
+    
+    switch (currentShape) {
+        case WaveformType::Sine:
+            return "Sine";
+        case WaveformType::RampDown:
+            return "Ramp Down";
+        case WaveformType::RampUp:
+            return "Ramp Up";
+        case WaveformType::Square:
+            return "Square";
+        case WaveformType::Triangle:
+            return "Triangle";
+        case WaveformType::HumpDown:
+            return "Hump Down";
+        case WaveformType::HumpUp:
+            return "Hump Up";
+        default:
+            return "Unknown";
+    }
+}
+
 // Private helper methods
 
 void LFO::initializeWaveTable()
@@ -425,15 +502,338 @@ void LFO::initializeWaveTable()
         waveTable.resize(DEFAULT_WAVETABLE_SIZE);
     }
     
-    // Generate sine wave with proper [0,1] mapping
+    // Generate waveform based on selected waveshape
+    WaveformType currentShape = waveShape.load();
+    
+    switch (currentShape) {
+        case WaveformType::Sine:
+            generateSineWave();
+            break;
+        case WaveformType::RampDown:
+            generateRampDownWave();
+            break;
+        case WaveformType::RampUp:
+            generateRampUpWave();
+            break;
+        case WaveformType::Square:
+            generateSquareWave();
+            break;
+        case WaveformType::Triangle:
+            generateTriangleWave();
+            break;
+        case WaveformType::HumpDown:
+            generateHumpDownWave();
+            break;
+        case WaveformType::HumpUp:
+            generateHumpUpWave();
+            break;
+        default:
+            generateSineWave(); // Fallback to sine
+            break;
+    }
+}
+
+void LFO::checkForDownbeatLock(double currentTime)
+{
+    // Check if we're at or very close to a downbeat (beatPosition near 0.0)
+    double currentBeatPos = hostBeatPosition.load();
+    
+    // Consider it a downbeat if we're within 0.1 beats of the start
+    // This provides some tolerance for timing variations
+    if (currentBeatPos < 0.1 || currentBeatPos > 0.9) {
+        // Check if this is a new downbeat (not the same one we already processed)
+        double lastDownbeat = lastDownbeatTime.load();
+        
+        // If this is a new downbeat, reset the LFO phase
+        if (std::abs(currentTime - lastDownbeat) > 0.1) { // At least 0.1 seconds difference
+            DBG("LFO Downbeat detected at beat position " << currentBeatPos << ", resetting phase");
+            
+            // Reset LFO position to start of waveform (phase 0)
+            position.store(0.0f);
+            
+            // Update last downbeat time
+            lastDownbeatTime.store(currentTime);
+            downbeatDetected.store(true);
+        }
+    }
+}
+
+void LFO::generateSineWave()
+{
     const int tableSize = static_cast<int>(waveTable.size());
-    for (int i = 0; i < tableSize; ++i) {
-        // Generate sine wave from 0 to 2π
-        double phase = (TWO_PI * i) / tableSize;
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    // Populate the Left-Hand Period
+    for (int i = 0; i < periodLeft; ++i) {
+        // Generate sine wave from 0 to π (first half)
+        double phase = (M_PI * i) / periodLeft;
         float sineValue = static_cast<float>(std::sin(phase));
         
         // Convert [-1, +1] to [0, 1] range
-        waveTable[i] = (sineValue * 0.5f) + 0.5f;
+        float y = (sineValue * 0.5f) + 0.5f;
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+    
+    // Populate the Right-Hand Period
+    for (int i = periodLeft; i < tableSize; ++i) {
+        // Generate sine wave from π to 2π (second half)
+        double phase = M_PI + (M_PI * (i - periodLeft)) / periodRight;
+        float sineValue = static_cast<float>(std::sin(phase));
+        
+        // Convert [-1, +1] to [0, 1] range
+        float y = (sineValue * 0.5f) + 0.5f;
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+}
+
+void LFO::generateRampDownWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    float deltaDown = 0.01f;
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    for (int i = 0; i < tableSize; ++i) {
+        // Corner-Rounding Function
+        float y = ((1.0f / std::atan(1.0f / deltaDown)) * std::atan(std::sin(M_PI * i / tableSize) / deltaDown));
+        
+        // Waveshape Function
+        float x;
+        
+        // Populate the Left-Hand Period
+        if (i < periodLeft) {
+            x = 1.0f + (0.5f) * (-static_cast<float>(i) / periodLeft);
+        }
+        // Populate the Right-Hand Period
+        else {
+            x = (0.5f) + (0.5f) * (-static_cast<float>(i - periodLeft) / periodRight);
+        }
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            x = 1.0f - x;
+        }
+        
+        waveTable[i] = y * x;
+    }
+}
+
+void LFO::generateRampUpWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    float deltaUp = 0.01f;
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    for (int i = 0; i < tableSize; ++i) {
+        // Corner-Rounding Function
+        float y = ((1.0f / std::atan(1.0f / deltaUp)) * std::atan(std::sin(M_PI * i / tableSize) / deltaUp));
+        
+        // Waveshape Function
+        float x;
+        
+        // Populate the Left-Hand Period
+        if (i < periodLeft) {
+            x = (0.5f) * (static_cast<float>(i) / periodLeft);
+        }
+        // Populate the Right-Hand Period
+        else {
+            x = (0.5f) + (0.5f) * (static_cast<float>(i - periodLeft) / periodRight);
+        }
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            x = 1.0f - x;
+        }
+        
+        waveTable[i] = x * y;
+    }
+}
+
+void LFO::generateSquareWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    float deltaPulse = 0.01f;
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    // Populate the Left-Hand Period (high)
+    for (int i = 0; i < periodLeft; ++i) {
+        float y = 0.5f + ((0.5f / std::atan(1.0f / deltaPulse)) * std::atan(std::sin(M_PI * i / periodLeft) / deltaPulse));
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+    
+    // Populate the Right-Hand Period (low)
+    for (int i = periodLeft; i < tableSize; ++i) {
+        float y = 0.5f - ((0.5f / std::atan(1.0f / deltaPulse)) * std::atan(std::sin(M_PI * (i - periodLeft) / periodRight) / deltaPulse));
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+}
+
+void LFO::generateTriangleWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    // Populate the Left-Hand Period
+    for (int i = 0; i < periodLeft; ++i) {
+        float y = static_cast<float>(i) / periodLeft;
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+    
+    // Populate the Right-Hand Period
+    for (int i = periodLeft; i < tableSize; ++i) {
+        float y = 1.0f - (static_cast<float>(i - periodLeft) / periodRight);
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+}
+
+void LFO::generateHumpDownWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    // Populate the Left-Hand Period
+    for (int i = 0; i < periodLeft; ++i) {
+        float y = std::sin(0.5f * M_PI * i / periodLeft);
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+    
+    // Populate the Right-Hand Period
+    for (int i = periodLeft; i < tableSize; ++i) {
+        float y = std::cos(0.5f * M_PI * (i - periodLeft) / periodRight);
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+}
+
+void LFO::generateHumpUpWave()
+{
+    const int tableSize = static_cast<int>(waveTable.size());
+    
+    // Calculate periods based on current symmetry setting
+    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    int periodLeft = static_cast<int>(tableSize * currentSymmetry);
+    int periodRight = tableSize - periodLeft;
+    
+    // Ensure minimum period sizes
+    if (periodLeft < 1) periodLeft = 1;
+    if (periodRight < 1) periodRight = 1;
+    
+    // Populate the Left-Hand Period
+    for (int i = 0; i < periodLeft; ++i) {
+        float y = (-std::sin(0.5f * M_PI * i / periodLeft) + 1.0f);
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
+    }
+    
+    // Populate the Right-Hand Period
+    for (int i = periodLeft; i < tableSize; ++i) {
+        float y = (-std::cos(0.5f * M_PI * (i - periodLeft) / periodRight) + 1.0f);
+        
+        // Apply inversion if enabled
+        if (invert.load()) {
+            y = 1.0f - y;
+        }
+        
+        waveTable[i] = y;
     }
 }
 
