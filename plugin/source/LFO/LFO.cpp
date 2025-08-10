@@ -49,6 +49,9 @@ void LFO::prepare(double newSampleRate)
     // Reset downbeat tracking
     downbeatDetected.store(false);
     lastDownbeatTime.store(0.0);
+    
+    // Reset parameter change detection
+    firstRun.store(true);
 }
 
 void LFO::setFrequency(double frequencyInHz)
@@ -190,6 +193,11 @@ float LFO::getNextSample()
         return 0.0f;
     }
     
+    // Early return if disabled - return 1.0 (no modulation)
+    if (!enabled.load()) {
+        return 1.0f;
+    }
+    
     // Get current values
     float currentPos = position.load();
     float currentIncrement = increment.load();
@@ -273,6 +281,11 @@ float LFO::getCurrentSample() const
     // Early return if not prepared
     if (!prepared.load()) {
         return 0.0f;
+    }
+    
+    // Early return if disabled - return 1.0 (no modulation)
+    if (!enabled.load()) {
+        return 1.0f;
     }
     
     // Get current values WITHOUT advancing position
@@ -834,6 +847,90 @@ void LFO::generateHumpUpWave()
         }
         
         waveTable[i] = y;
+    }
+}
+
+void LFO::updateParameters(float frequency, float depth, bool enabled,
+                          bool invert, float phaseOffset, float symmetry, bool syncToHost,
+                          int syncRate, WaveformType waveshape)
+{
+    // Store enabled state
+    this->enabled.store(enabled);
+    
+    // Check frequency changes
+    if (frequency != lastFrequency.load() || firstRun.load()) {
+        setFrequency(frequency);
+        lastFrequency.store(frequency);
+    }
+    
+    // Check depth changes
+    if (depth != lastDepth.load() || firstRun.load()) {
+        setDepth(depth);
+        lastDepth.store(depth);
+    }
+    
+    // Check invert changes
+    if (invert != lastInvert.load() || firstRun.load()) {
+        setInvert(invert);
+        lastInvert.store(invert);
+    }
+    
+    // Check phase offset changes
+    if (phaseOffset != lastPhaseOffset.load() || firstRun.load()) {
+        setPhaseOffset(phaseOffset * (M_PI / 180.0f)); // Convert degrees to radians
+        lastPhaseOffset.store(phaseOffset);
+    }
+    
+    // Check symmetry changes
+    if (symmetry != lastSymmetry.load() || firstRun.load()) {
+        setSymmetry(symmetry);
+        lastSymmetry.store(symmetry);
+    }
+    
+    // Check sync to host changes
+    if (syncToHost != lastSyncToHost.load() || firstRun.load()) {
+        setSyncToHost(syncToHost);
+        lastSyncToHost.store(syncToHost);
+    }
+    
+    // Check sync rate changes
+    if (syncRate != lastSyncRate.load() || firstRun.load()) {
+        setSyncRate(syncRate);
+        lastSyncRate.store(syncRate);
+    }
+    
+    // Check waveshape changes
+    if (waveshape != lastWaveshape.load() || firstRun.load()) {
+        setWaveShape(waveshape);
+        lastWaveshape.store(waveshape);
+    }
+    
+    // Mark first run as complete
+    if (firstRun.load()) {
+        firstRun.store(false);
+    }
+}
+
+void LFO::updateFromPlayHead(juce::AudioPlayHead* playHead)
+{
+    if (playHead != nullptr) {
+        juce::AudioPlayHead::CurrentPositionInfo positionInfo;
+        if (playHead->getCurrentPosition(positionInfo)) {
+            double hostBPM = positionInfo.bpm > 0.0 ? positionInfo.bpm : 120.0;
+            bool isPlaying = positionInfo.isPlaying;
+            
+            // Use the extended version if we have beat position info
+            if (positionInfo.ppqPositionOfLastBarStart >= 0.0) {
+                double beatPosition = positionInfo.ppqPositionOfLastBarStart;
+                double ppqPosition = positionInfo.ppqPosition;
+                updateHostInfo(hostBPM, isPlaying, beatPosition, ppqPosition);
+            } else {
+                updateHostInfo(hostBPM, isPlaying);
+            }
+        }
+    } else {
+        // Fallback when no host available
+        updateHostInfo(120.0, true);
     }
 }
 

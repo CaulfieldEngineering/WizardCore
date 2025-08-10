@@ -168,6 +168,38 @@ public:
     void updateHostInfo(double bpm, bool isPlaying, double beatPosition, double ppqPosition);
 
     /**
+     * @brief Update all LFO parameters at once with automatic change detection
+     * @param frequency LFO frequency in Hz
+     * @param depth Modulation depth (0.0-1.0)
+     * @param enabled Whether LFO is enabled
+     * @param invert Whether to invert the waveform
+     * @param phaseOffset Phase offset in degrees (-180 to 180)
+     * @param symmetry Symmetry percentage (10.0-90.0)
+     * @param syncToHost Whether to sync to host tempo
+     * @param syncRate Rhythm index (0=1/2, 1=1/4, 2=1/4T, 3=1/8, 4=1/8T, 5=1/16)
+     * @param waveshape Waveform type
+     * 
+     * This method efficiently updates all parameters and only regenerates
+     * the wavetable when necessary. Call this from processBlock instead
+     * of individual setter methods for optimal performance.
+     * Thread-safe for audio processing.
+     */
+    void updateParameters(float frequency, float depth, bool enabled,
+                        bool invert, float phaseOffset, float symmetry, bool syncToHost,
+                        int syncRate, WaveformType waveshape);
+
+    /**
+     * @brief Update host information and automatically handle playhead updates
+     * @param playHead JUCE playhead pointer (can be nullptr)
+     * 
+     * This method automatically extracts host timing information and updates
+     * the LFO accordingly. Call this from processBlock to keep the LFO
+     * synchronized with the host.
+     * Thread-safe for audio processing.
+     */
+    void updateFromPlayHead(juce::AudioPlayHead* playHead);
+
+    /**
      * @brief Get the next LFO sample and advance position
      * @return LFO sample value normalized to [0, 1] range scaled by depth
      * 
@@ -217,6 +249,7 @@ public:
     double getHostBeatPosition() const { return hostBeatPosition.load(); }
     double getHostPPQPosition() const { return hostPPQPosition.load(); }
     bool isDownbeatDetected() const { return downbeatDetected.load(); }
+    bool isEnabled() const { return enabled.load(); }
     
     /**
      * @brief Get the current waveshape name as a string
@@ -268,6 +301,20 @@ private:
     // Smoothed parameters to prevent clicks
     juce::SmoothedValue<float> smoothedDepth{1.0f};
     juce::SmoothedValue<float> smoothedSymmetry{0.5f};
+    
+    // Parameter change detection (for efficient updates)
+    std::atomic<float> lastFrequency{-1.0f};
+    std::atomic<float> lastDepth{-1.0f};
+    std::atomic<bool> lastInvert{false};
+    std::atomic<float> lastPhaseOffset{-999.0f};
+    std::atomic<float> lastSymmetry{-1.0f};
+    std::atomic<bool> lastSyncToHost{false};
+    std::atomic<int> lastSyncRate{-1};
+    std::atomic<WaveformType> lastWaveshape{WaveformType::Sine};
+    std::atomic<bool> firstRun{true};
+    
+    // Enabled state
+    std::atomic<bool> enabled{true};
     
     // Wavetable data (only modified during prepare())
     std::vector<float> waveTable;

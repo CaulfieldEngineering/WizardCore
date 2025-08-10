@@ -69,11 +69,10 @@ private:
 	std::atomic<float>* lfoFrequencyParam = nullptr;
 	std::atomic<float>* lfoDepthParam = nullptr;
 	std::atomic<float>* lfoEnabledParam = nullptr;
-	std::atomic<float>* lfoOutputLevelParam = nullptr;
 	std::atomic<float>* lfoInvertParam = nullptr;
-	std::atomic<float>* lfoPhaseOffsetParam = nullptr;
-	std::atomic<float>* lfoSymmetryParam = nullptr;
-	std::atomic<float>* lfoSyncToHostParam = nullptr;
+    std::atomic<float>* lfoPhaseOffsetParam = nullptr;
+    std::atomic<float>* lfoSymmetryParam = nullptr;
+    std::atomic<float>* lfoSyncToHostParam = nullptr;
 	std::atomic<float>* lfoSyncRateParam = nullptr;
 	std::atomic<float>* lfoWaveshapeParam = nullptr;
 

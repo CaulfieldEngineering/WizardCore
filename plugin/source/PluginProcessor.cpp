@@ -56,13 +56,7 @@ namespace audio_plugin {
                 juce::AudioParameterBoolAttributes()
             ),
             
-            std::make_unique<juce::AudioParameterFloat>(
-                "lfo_output_level",        // parameterID
-                "LFO Output Level",        // parameter name
-                juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
-                0.8f,                      // default value
-                juce::AudioParameterFloatAttributes()
-            ),
+
             
             std::make_unique<juce::AudioParameterBool>(
                 "lfo_invert",              // parameterID
@@ -117,7 +111,6 @@ namespace audio_plugin {
         lfoFrequencyParam = parameters.getRawParameterValue("lfo_frequency");
         lfoDepthParam = parameters.getRawParameterValue("lfo_depth");
         lfoEnabledParam = parameters.getRawParameterValue("lfo_enabled");
-        lfoOutputLevelParam = parameters.getRawParameterValue("lfo_output_level");
         lfoInvertParam = parameters.getRawParameterValue("lfo_invert");
         lfoPhaseOffsetParam = parameters.getRawParameterValue("lfo_phase_offset");
         lfoSymmetryParam = parameters.getRawParameterValue("lfo_symmetry");
@@ -195,25 +188,9 @@ namespace audio_plugin {
             return;
         }
         
-        // Prepare LFO
+        // Prepare LFO - all parameter initialization will happen automatically
+        // when updateParameters is called for the first time
         lfo.prepare(sampleRate);
-        
-        // Set initial LFO parameters
-        lfo.setFrequency(lfoFrequencyParam->load());
-        lfo.setDepth(lfoDepthParam->load());
-        lfo.setInvert(lfoInvertParam->load() > 0.5f);
-        lfo.setSymmetry(lfoSymmetryParam->load());
-        lfo.setSyncToHost(lfoSyncToHostParam->load() > 0.5f);
-        lfo.setSyncRate(static_cast<int>(lfoSyncRateParam->load()));
-        
-        // Set initial waveshape
-        int waveshapeIndex = static_cast<int>(lfoWaveshapeParam->load());
-        lfo.setWaveShape(static_cast<audio_plugin::LFO::WaveformType>(waveshapeIndex));
-        
-        // Convert degrees to radians for phase offset
-        float phaseOffsetDegrees = lfoPhaseOffsetParam->load();
-        float phaseOffsetRadians = phaseOffsetDegrees * (M_PI / 180.0f);
-        lfo.setPhaseOffset(phaseOffsetRadians);
         
         DBG("Plugin prepared successfully with LFO");
     }
@@ -266,126 +243,39 @@ namespace audio_plugin {
             return;
         }
         
-        // Update LFO parameters from UI (only when they change)
-        float newFrequency = lfoFrequencyParam->load();
-        float newDepth = lfoDepthParam->load();
-        bool newInvert = lfoInvertParam->load() > 0.5f;
-        float newPhaseOffsetDegrees = lfoPhaseOffsetParam->load();
-        float newSymmetry = lfoSymmetryParam->load();
-        bool newSyncToHost = lfoSyncToHostParam->load() > 0.5f;
-        float rawSyncRate = lfoSyncRateParam->load();
-        int newSyncRate = static_cast<int>(rawSyncRate);
-        float rawWaveshape = lfoWaveshapeParam->load();
-        int newWaveshape = static_cast<int>(rawWaveshape);
+        // Update all LFO parameters at once (handles change detection internally)
+        lfo.updateParameters(
+            lfoFrequencyParam->load(),
+            lfoDepthParam->load(),
+            lfoEnabledParam->load() > 0.5f,
+            lfoInvertParam->load() > 0.5f,
+            lfoPhaseOffsetParam->load(),
+            lfoSymmetryParam->load(),
+            lfoSyncToHostParam->load() > 0.5f,
+            static_cast<int>(lfoSyncRateParam->load()),
+            static_cast<audio_plugin::LFO::WaveformType>(static_cast<int>(lfoWaveshapeParam->load()))
+        );
         
-        // Debug parameter values every 1000 samples to avoid spam, but always show sync rate changes
-        static int debugCounter = 0;
-        static float lastRawSyncRate = -999.0f;
-        
-        if (++debugCounter % 1000 == 0 || rawSyncRate != lastRawSyncRate) {
-            DBG("Parameters: Freq=" << newFrequency << "Hz, Depth=" << newDepth 
-                << ", SyncToHost=" << (newSyncToHost ? "true" : "false") << ", RawSyncRate=" << rawSyncRate 
-                << ", IntSyncRate=" << newSyncRate);
-            lastRawSyncRate = rawSyncRate;
-        }
-        
-        // Only update if values have changed
-        static float lastFrequency = -1.0f;
-        static float lastDepth = -1.0f;
-        static bool lastInvert = false;
-        static float lastPhaseOffsetDegrees = -999.0f;
-        static float lastSymmetry = -1.0f;
-        static bool lastSyncToHost = false;
-        static int lastSyncRate = -1;
-        static int lastWaveshape = -1;
-        static bool firstRun = true;
-        
-        if (newFrequency != lastFrequency) {
-            lfo.setFrequency(newFrequency);
-            lastFrequency = newFrequency;
-        }
-        
-        if (newDepth != lastDepth) {
-            lfo.setDepth(newDepth);
-            lastDepth = newDepth;
-        }
-        
-        if (newInvert != lastInvert) {
-            lfo.setInvert(newInvert);
-            lastInvert = newInvert;
-        }
-        
-        if (newPhaseOffsetDegrees != lastPhaseOffsetDegrees) {
-            // Convert degrees to radians
-            float phaseOffsetRadians = newPhaseOffsetDegrees * (M_PI / 180.0f);
-            lfo.setPhaseOffset(phaseOffsetRadians);
-            lastPhaseOffsetDegrees = newPhaseOffsetDegrees;
-        }
-        
-        if (newSymmetry != lastSymmetry) {
-            lfo.setSymmetry(newSymmetry);
-            lastSymmetry = newSymmetry;
-        }
-        
-        if (newSyncToHost != lastSyncToHost || firstRun) {
-            lfo.setSyncToHost(newSyncToHost);
-            lastSyncToHost = newSyncToHost;
-        }
-
-        // Always log sync rate for debugging
-        DBG("PluginProcessor: Checking sync rate - Current=" << newSyncRate << ", Last=" << lastSyncRate << ", FirstRun=" << (firstRun ? "true" : "false"));
-        
-        if (newSyncRate != lastSyncRate || firstRun) {
-            DBG("PluginProcessor: Sync rate parameter changed from " << lastSyncRate << " to " << newSyncRate);
-            lfo.setSyncRate(newSyncRate);
-            lastSyncRate = newSyncRate;
-        } else {
-            DBG("PluginProcessor: Sync rate unchanged, not updating LFO");
-        }
-        
-        if (newWaveshape != lastWaveshape || firstRun) {
-            DBG("PluginProcessor: Waveshape parameter changed from " << lastWaveshape << " to " << newWaveshape);
-            lfo.setWaveShape(static_cast<audio_plugin::LFO::WaveformType>(newWaveshape));
-            lastWaveshape = newWaveshape;
-        }
-        
-        firstRun = false;
-        
-        // Get host timing information
-        juce::AudioPlayHead* playHead = getPlayHead();
-        if (playHead != nullptr) {
-            juce::AudioPlayHead::CurrentPositionInfo positionInfo;
-            if (playHead->getCurrentPosition(positionInfo)) {
-                double hostBPM = positionInfo.bpm > 0.0 ? positionInfo.bpm : 120.0;
-                bool isPlaying = positionInfo.isPlaying;
-                lfo.updateHostInfo(hostBPM, isPlaying);
-            }
-        } else {
-            // Fallback when no host available
-            lfo.updateHostInfo(120.0, true);
-        }
+        // Update host timing information automatically
+        lfo.updateFromPlayHead(getPlayHead());
         
         // Process LFO and output to audio for oscilloscope viewing
-        if (lfoEnabledParam->load() > 0.5f) {
-            const float outputLevel = lfoOutputLevelParam->load();
+        // LFO handles enabled state internally - returns 1.0 when disabled
+        for (int i = 0; i < numSamples; ++i) {
+            // Get LFO sample (returns 1.0 if disabled, modulated value if enabled)
+            float lfoSample = lfo.getNextSample();
             
-            // Generate LFO signal once per sample, then apply to all channels
-            for (int i = 0; i < numSamples; ++i) {
-                // Get LFO sample ONCE per sample and scale by output level
-                float lfoSample = lfo.getNextSample() * outputLevel;
+            // Apply to all channels
+            for (int ch = 0; ch < totalNumOutputChannels; ++ch) {
+                float* channelData = buffer.getWritePointer(ch);
                 
-                // Apply to all channels
-                for (int ch = 0; ch < totalNumOutputChannels; ++ch) {
-                    float* channelData = buffer.getWritePointer(ch);
-                    
-                    // Mix with input signal (if any) or output LFO directly
-                    if (totalNumInputChannels > 0) {
-                        // Mix input with LFO signal
-                        channelData[i] = channelData[i] + lfoSample;
-                    } else {
-                        // Output LFO signal directly (for oscilloscope viewing)
-                        channelData[i] = lfoSample;
-                    }
+                // Mix with input signal (if any) or output LFO directly
+                if (totalNumInputChannels > 0) {
+                    // Mix input with LFO signal
+                    channelData[i] = channelData[i] + lfoSample;
+                } else {
+                    // Output LFO signal directly (for oscilloscope viewing)
+                    channelData[i] = lfoSample;
                 }
             }
         }
