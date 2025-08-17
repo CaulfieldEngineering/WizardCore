@@ -1,24 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// Ensure M_PI is defined
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// Static StringArray to avoid construction issues
-static juce::StringArray createRhythmOptions()
-{
-    juce::StringArray options;
-    options.add("1/2 Note");
-    options.add("1/4 Note");  
-    options.add("1/4 Triplet");
-    options.add("1/8 Note");
-    options.add("1/8 Triplet");
-    options.add("1/16 Note");
-    return options;
-}
-
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
         : AudioProcessor(
@@ -31,94 +13,69 @@ namespace audio_plugin {
     #endif
         ),
         parameters(*this, nullptr, "PARAMETERS", {
-            // Essential LFO parameters for testing
+            // Global Chorus parameters
             std::make_unique<juce::AudioParameterFloat>(
-                "lfo_frequency",           // parameterID
-                "LFO Frequency",           // parameter name
-                juce::NormalisableRange<float>(0.1f, 1000.0f, 0.1f, 0.3f), // range with skew
-                1.0f,                      // default value
+                "chorus_rate",              // parameterID
+                "Chorus Rate",              // parameter name
+                juce::NormalisableRange<float>(0.1f, 2.0f, 0.01f, 0.5f), // range with skew
+                0.8f,                      // default value
                 juce::AudioParameterFloatAttributes()
                     .withLabel("Hz")
             ),
             
             std::make_unique<juce::AudioParameterFloat>(
-                "lfo_depth",               // parameterID
-                "LFO Depth",               // parameter name
+                "chorus_depth",             // parameterID
+                "Chorus Depth",             // parameter name
                 juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
-                1.0f,                      // default value
+                0.5f,                      // default value
                 juce::AudioParameterFloatAttributes()
-            ),
-            
-            std::make_unique<juce::AudioParameterBool>(
-                "lfo_enabled",             // parameterID
-                "LFO Enabled",             // parameter name
-                true,                      // default value
-                juce::AudioParameterBoolAttributes()
-            ),
-            
-
-            
-            std::make_unique<juce::AudioParameterBool>(
-                "lfo_invert",              // parameterID
-                "LFO Invert",              // parameter name
-                false,                     // default value (not inverted)
-                juce::AudioParameterBoolAttributes()
             ),
             
             std::make_unique<juce::AudioParameterFloat>(
-                "lfo_phase_offset",        // parameterID
-                "LFO Phase Offset",        // parameter name
-                juce::NormalisableRange<float>(-180.0f, 180.0f, 1.0f),
-                0.0f,                      // default value (0 degrees, center position)
+                "chorus_mix",               // parameterID
+                "Chorus Mix",               // parameter name
+                juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+                0.5f,                      // default value
                 juce::AudioParameterFloatAttributes()
-                    .withLabel("Deg.")        // degrees symbol
             ),
             
             std::make_unique<juce::AudioParameterFloat>(
-                "lfo_symmetry",            // parameterID
-                "LFO Symmetry",            // parameter name
-                juce::NormalisableRange<float>(10.0f, 90.0f, 1.0f),
-                50.0f,                     // default value (50%, symmetric)
+                "chorus_base_delay",        // parameterID
+                "Chorus Base Delay",        // parameter name
+                juce::NormalisableRange<float>(10.0f, 100.0f, 1.0f),
+                30.0f,                     // default value
                 juce::AudioParameterFloatAttributes()
-                    .withLabel("%")        // percentage symbol
+                    .withLabel("ms")
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "chorus_voice_count",       // parameterID
+                "Number of Voices",         // parameter name
+                juce::NormalisableRange<float>(1.0f, 5.0f, 1.0f), // 1.0 to 5.0, step 1.0
+                1.0f                        // default value
             ),
             
             std::make_unique<juce::AudioParameterBool>(
-                "lfo_sync_to_host",        // parameterID
-                "LFO Sync to Host",        // parameter name
-                false,                     // default value (manual frequency mode)
-                juce::AudioParameterBoolAttributes()
-            ),
-            
-            std::make_unique<juce::AudioParameterChoice>(
-                "lfo_sync_rate",           // parameterID
-                "LFO Rhythm",              // parameter name
-                createRhythmOptions(),
-                1,                         // default value (1/4 note)
-                juce::AudioParameterChoiceAttributes()
-            ),
-            
-            std::make_unique<juce::AudioParameterChoice>(
-                "lfo_waveshape",           // parameterID
-                "LFO Waveshape",           // parameter name
-                juce::StringArray{"Sine", "Ramp Down", "Ramp Up", "Square", "Triangle", "Hump Down", "Hump Up"},
-                0,                         // default value (Sine)
-                juce::AudioParameterChoiceAttributes()
+                "chorus_enabled",           // parameterID
+                "Chorus Enabled",           // parameter name
+                true                        // default value
             )
         })
     {
-        // Initialize parameter pointers for quick access
-        lfoFrequencyParam = parameters.getRawParameterValue("lfo_frequency");
-        lfoDepthParam = parameters.getRawParameterValue("lfo_depth");
-        lfoEnabledParam = parameters.getRawParameterValue("lfo_enabled");
-        lfoInvertParam = parameters.getRawParameterValue("lfo_invert");
-        lfoPhaseOffsetParam = parameters.getRawParameterValue("lfo_phase_offset");
-        lfoSymmetryParam = parameters.getRawParameterValue("lfo_symmetry");
-        lfoSyncToHostParam = parameters.getRawParameterValue("lfo_sync_to_host");
-        lfoSyncRateParam = parameters.getRawParameterValue("lfo_sync_rate");
-        lfoWaveshapeParam = parameters.getRawParameterValue("lfo_waveshape");
+        // Initialize global parameter pointers for quick access
+        chorusRateParam = parameters.getRawParameterValue("chorus_rate");
+        chorusDepthParam = parameters.getRawParameterValue("chorus_depth");
+        chorusMixParam = parameters.getRawParameterValue("chorus_mix");
+        chorusBaseDelayParam = parameters.getRawParameterValue("chorus_base_delay");
+        chorusVoiceCountParam = parameters.getRawParameterValue("chorus_voice_count");
+        chorusEnabledParam = parameters.getRawParameterValue("chorus_enabled");
         
-        DBG("PluginProcessor: Essential LFO parameters initialized");
+        // Verify global parameter initialization
+        if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam) {
+            DBG("PluginProcessor: Warning - Some global chorus parameters failed to initialize");
+        }
+        
+        DBG("PluginProcessor: Multi-voice Chorus parameters initialized");
     }
 
     AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
@@ -188,11 +145,12 @@ namespace audio_plugin {
             return;
         }
         
-        // Prepare LFO - all parameter initialization will happen automatically
+        // Prepare Chorus - all parameter initialization will happen automatically
         // when updateParameters is called for the first time
-        lfo.prepare(sampleRate);
-        
-        DBG("Plugin prepared successfully with LFO");
+        chorus.prepare(sampleRate, getTotalNumInputChannels());
+        chorus.setNumVoices(5);
+		
+        DBG("Plugin prepared successfully with Multi-Voice Chorus");
     }
 
     void AudioPluginAudioProcessor::releaseResources() {
@@ -243,42 +201,32 @@ namespace audio_plugin {
             return;
         }
         
-        // Update all LFO parameters at once (handles change detection internally)
-        lfo.updateParameters(
-            lfoFrequencyParam->load(),
-            lfoDepthParam->load(),
-            lfoEnabledParam->load() > 0.5f,
-            lfoInvertParam->load() > 0.5f,
-            lfoPhaseOffsetParam->load(),
-            lfoSymmetryParam->load(),
-            lfoSyncToHostParam->load() > 0.5f,
-            static_cast<int>(lfoSyncRateParam->load()),
-            static_cast<audio_plugin::LFO::WaveformType>(static_cast<int>(lfoWaveshapeParam->load()))
-        );
+        // Update global Chorus parameters
+        if (chorusRateParam) chorus.setRate(chorusRateParam->load());
+        if (chorusDepthParam) chorus.setDepth(chorusDepthParam->load());
+        if (chorusMixParam) chorus.setMix(chorusMixParam->load());
+        if (chorusBaseDelayParam) chorus.setBaseDelay(chorusBaseDelayParam->load());
         
-        // Update host timing information automatically
-        lfo.updateFromPlayHead(getPlayHead());
-        
-        // Process LFO and output to audio for oscilloscope viewing
-        // LFO handles enabled state internally - returns 1.0 when disabled
-        for (int i = 0; i < numSamples; ++i) {
-            // Get LFO sample (returns 1.0 if disabled, modulated value if enabled)
-            float lfoSample = lfo.getNextSample();
-            
-            // Apply to all channels
-            for (int ch = 0; ch < totalNumOutputChannels; ++ch) {
-                float* channelData = buffer.getWritePointer(ch);
-                
-                // Mix with input signal (if any) or output LFO directly
-                if (totalNumInputChannels > 0) {
-                    // Mix input with LFO signal
-                    channelData[i] = channelData[i] + lfoSample;
-                } else {
-                    // Output LFO signal directly (for oscilloscope viewing)
-                    channelData[i] = lfoSample;
-                }
-            }
+		chorus.getVoiceLFO(0)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
+		chorus.getVoiceLFO(1)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
+		chorus.getVoiceLFO(2)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
+		chorus.getVoiceLFO(3)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
+		chorus.getVoiceLFO(4)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
+
+        // Update voice count (convert float to int)
+        if (chorusVoiceCountParam) {
+            int voiceCount = static_cast<int>(chorusVoiceCountParam->load());
+            chorus.setNumVoices(voiceCount);
         }
+
+        // Update chorus enabled state (convert float to bool)
+        if (chorusEnabledParam) {
+            bool enabled = chorusEnabledParam->load() > 0.5f;
+            chorus.setEnabled(enabled);
+        }
+        
+        // Process audio through the multi-voice chorus effect
+        chorus.processBlock(buffer);
     }
 
     bool AudioPluginAudioProcessor::hasEditor() const {

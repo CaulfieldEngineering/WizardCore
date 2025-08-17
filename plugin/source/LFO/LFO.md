@@ -204,8 +204,6 @@ void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
 ## Open Issues
 - Add remaining waveforms
-- Alternating between Sync and Frequency needs testing (needs to retain frequency value)
-- Changing host tempo needs testing
 - Parameter smoothing needs optimization (slider is faster than smoothing values)
 
 ## Dependencies

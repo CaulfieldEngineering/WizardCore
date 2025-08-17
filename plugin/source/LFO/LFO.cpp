@@ -87,7 +87,7 @@ void LFO::setInvert(bool shouldInvert)
     // Regenerate wavetable if prepared, since inversion affects the waveshape
     if (prepared.load()) {
         initializeWaveTable();
-        DBG("LFO Invert changed to " << (shouldInvert ? "true" : "false") << ", wavetable regenerated");
+        // DBG("LFO Invert changed to " << (shouldInvert ? "true" : "false") << ", wavetable regenerated");
     }
 }
 
@@ -105,7 +105,7 @@ void LFO::setWaveShape(WaveformType waveshape)
     // Regenerate wavetable if prepared
     if (prepared.load()) {
         initializeWaveTable();
-        DBG("LFO WaveShape changed to " << static_cast<int>(waveshape) << ", wavetable regenerated");
+        // DBG("LFO WaveShape changed to " << static_cast<int>(waveshape) << ", wavetable regenerated");
     }
 }
 
@@ -117,7 +117,7 @@ void LFO::setSyncToHost(bool shouldSync)
     if (shouldSync) {
         downbeatDetected.store(false);
         lastDownbeatTime.store(0.0);
-        DBG("LFO Sync mode enabled - downbeat tracking reset");
+        // DBG("LFO Sync mode enabled - downbeat tracking reset");
     }
     
     // Recalculate increment when sync mode changes
@@ -134,25 +134,25 @@ void LFO::setSyncRate(int syncRateIndex)
     
     // Debug output - always show what we're trying to set
     const char* syncNames[] = {"1/2 Note", "1/4 Note", "1/4 Triplet", "1/8 Note", "1/8 Triplet", "1/16 Note"};
-    DBG("LFO setSyncRate called: requested=" << syncRateIndex << ", clamped=" << clampedIndex 
-        << " (" << syncNames[clampedIndex] << "), current=" << oldIndex);
+    // DBG("LFO setSyncRate called: requested=" << syncRateIndex << ", clamped=" << clampedIndex 
+    //     << " (" << syncNames[clampedIndex] << "), current=" << oldIndex);
     
     this->syncRateIndex.store(clampedIndex);
     
     // Debug output when sync rate changes
     if (oldIndex != clampedIndex) {
-        DBG("LFO Sync Rate changed from " << oldIndex << " (" << syncNames[oldIndex] << ") to " 
-            << clampedIndex << " (" << syncNames[clampedIndex] << ")");
+        // DBG("LFO Sync Rate changed from " << oldIndex << " (" << syncNames[oldIndex] << ") to " 
+        //     << clampedIndex << " (" << syncNames[clampedIndex] << ")");
     } else {
-        DBG("LFO Sync Rate unchanged at " << clampedIndex << " (" << syncNames[clampedIndex] << ")");
+        // DBG("LFO Sync Rate unchanged at " << clampedIndex << " (" << syncNames[clampedIndex] << ")");
     }
     
     // Recalculate increment if in sync mode
     if (prepared.load() && syncToHost.load()) {
-        DBG("LFO setSyncRate: Calling updateIncrement (sync mode active)");
+        // DBG("LFO setSyncRate: Calling updateIncrement (sync mode active)");
         updateIncrement();
     } else {
-        DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << (prepared.load() ? "true" : "false") << ", syncToHost=" << (syncToHost.load() ? "true" : "false") << ")");
+        // DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << (prepared.load() ? "true" : "false") << ", syncToHost=" << (syncToHost.load() ? "true" : "false") << ")");
     }
 }
 
@@ -358,25 +358,19 @@ float LFO::getCurrentSample() const
 
 float LFO::calculateSyncFrequency() const
 {
+    // Get current values atomically
     double currentBPM = hostBPM.load();
     int currentSyncRate = syncRateIndex.load();
     
     if (currentBPM <= 0.0) {
-        return 1.0f;  // Fallback frequency
+        return 1.0f;  // Fallback
     }
     
-    // Convert BPM to beats per second
-    float beatsPerSecond = static_cast<float>(currentBPM / 60.0);
+    // Calculate beats per second
+    double beatsPerSecond = currentBPM / 60.0;
     
-    // Musical division multipliers (frequency = BPM/60 * multiplier)
-    const float syncRateMultipliers[] = {
-        0.5f,     // 1/2 Note    = 0.5x BPM (slower - 2 beats per cycle)
-        1.0f,     // 1/4 Note    = 1.0x BPM (normal - 1 beat per cycle)
-        1.5f,     // 1/4 Triplet = 1.5x BPM (3 triplets per 2 beats)
-        2.0f,     // 1/8 Note    = 2.0x BPM (faster - 0.5 beats per cycle)
-        3.0f,     // 1/8 Triplet = 3.0x BPM (3 triplets per beat)
-        4.0f      // 1/16 Note   = 4.0x BPM (fastest - 0.25 beats per cycle)
-    };
+    // Sync rate multipliers for different note divisions
+    const double syncRateMultipliers[] = {0.5, 1.0, 1.333, 2.0, 2.667, 4.0};
     
     float resultFreq = 1.0f;  // Fallback
     
@@ -385,9 +379,9 @@ float LFO::calculateSyncFrequency() const
         resultFreq = beatsPerSecond * syncRateMultipliers[currentSyncRate];
         
         // Debug output to track sync frequency calculations
-        DBG("LFO Sync: BPM=" << currentBPM << ", SyncRateIndex=" << currentSyncRate 
-            << " (" << syncNames[currentSyncRate] << "), Multiplier=" << syncRateMultipliers[currentSyncRate] 
-            << ", BeatsPerSec=" << beatsPerSecond << ", ResultFreq=" << resultFreq << "Hz");
+        // DBG("LFO Sync: BPM=" << currentBPM << ", SyncRateIndex=" << currentSyncRate 
+        //     << " (" << syncNames[currentSyncRate] << "), Multiplier=" << syncRateMultipliers[currentSyncRate] 
+        //     << ", BeatsPerSec=" << beatsPerSecond << ", ResultFreq=" << resultFreq << "Hz");
     } else {
         DBG("LFO Sync: Invalid sync rate index " << currentSyncRate << ", using fallback");
     }
@@ -413,12 +407,12 @@ void LFO::updateIncrement()
         float rawSyncFreq = calculateSyncFrequency();
         currentFrequency = std::clamp(rawSyncFreq, static_cast<float>(MIN_FREQUENCY), static_cast<float>(MAX_FREQUENCY));
         
-        DBG("LFO updateIncrement: Sync mode - Raw=" << rawSyncFreq << "Hz, Clamped=" << currentFrequency << "Hz");
+        // DBG("LFO updateIncrement: Sync mode - Raw=" << rawSyncFreq << "Hz, Clamped=" << currentFrequency << "Hz");
     } else {
         // Use manual frequency
         currentFrequency = static_cast<float>(frequency.load());
         
-        DBG("LFO updateIncrement: Manual mode - Frequency=" << currentFrequency << "Hz");
+        // DBG("LFO updateIncrement: Manual mode - Frequency=" << currentFrequency << "Hz");
     }
     
     // Calculate increment: (frequency * tableSize) / sampleRate
@@ -427,9 +421,9 @@ void LFO::updateIncrement()
     // Clamp to reasonable bounds to prevent overflow
     double clampedIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
     
-    DBG("LFO increment: Freq=" << currentFrequency << "Hz, TableSize=" << waveTable.size() 
-        << ", SampleRate=" << currentSampleRate << ", RawIncrement=" << newIncrement 
-        << ", ClampedIncrement=" << clampedIncrement);
+    // DBG("LFO increment: Freq=" << currentFrequency << "Hz, TableSize=" << waveTable.size() 
+    //     << ", SampleRate=" << currentSampleRate << ", RawIncrement=" << newIncrement 
+    //     << ", ClampedIncrement=" << clampedIncrement);
     
     increment.store(static_cast<float>(clampedIncrement));
 }
@@ -559,7 +553,7 @@ void LFO::checkForDownbeatLock(double currentTime)
         
         // If this is a new downbeat, reset the LFO phase
         if (std::abs(currentTime - lastDownbeat) > 0.1) { // At least 0.1 seconds difference
-            DBG("LFO Downbeat detected at beat position " << currentBeatPos << ", resetting phase");
+            // DBG("LFO Downbeat detected at beat position " << currentBeatPos << ", resetting phase");
             
             // Reset LFO position to start of waveform (phase 0)
             position.store(0.0f);

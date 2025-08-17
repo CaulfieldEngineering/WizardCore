@@ -2,7 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 //#include "DelayLine/DelayLine.h"
-#include "LFO/LFO.h"
+#include "Chorus/Chorus.h"
 
 namespace audio_plugin {
 
@@ -62,19 +62,16 @@ private:
 		//// Smoothed value for mix parameter only (delay smoothing is in DelayLine)
 		//juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedMix;
 
-	// LFO ============================================================
-	LFO lfo;
+	// Chorus ============================================================
+	Chorus chorus;
 	
-	// LFO parameter pointers for quick access
-	std::atomic<float>* lfoFrequencyParam = nullptr;
-	std::atomic<float>* lfoDepthParam = nullptr;
-	std::atomic<float>* lfoEnabledParam = nullptr;
-	std::atomic<float>* lfoInvertParam = nullptr;
-    std::atomic<float>* lfoPhaseOffsetParam = nullptr;
-    std::atomic<float>* lfoSymmetryParam = nullptr;
-    std::atomic<float>* lfoSyncToHostParam = nullptr;
-	std::atomic<float>* lfoSyncRateParam = nullptr;
-	std::atomic<float>* lfoWaveshapeParam = nullptr;
+	// Global Chorus parameter pointers for quick access
+	std::atomic<float>* chorusRateParam = nullptr;
+	std::atomic<float>* chorusDepthParam = nullptr;
+	std::atomic<float>* chorusMixParam = nullptr;
+	std::atomic<float>* chorusBaseDelayParam = nullptr;
+	std::atomic<float>* chorusVoiceCountParam = nullptr;
+	std::atomic<float>* chorusEnabledParam = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)
