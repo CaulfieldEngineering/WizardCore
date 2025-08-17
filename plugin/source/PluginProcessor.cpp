@@ -59,6 +59,21 @@ namespace audio_plugin {
                 "chorus_enabled",           // parameterID
                 "Chorus Enabled",           // parameter name
                 true                        // default value
+            ),
+            
+            // Stereo Chorus parameters
+            std::make_unique<juce::AudioParameterChoice>(
+                "chorus_stereo_mode",       // parameterID
+                "Stereo Mode",              // parameter name
+                juce::StringArray{"Mono", "Stereo"}, // choices
+                0                           // default value (Mono)
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "chorus_stereo_spread",     // parameterID
+                "Stereo Spread",            // parameter name
+                juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+                0.5f                        // default value
             )
         })
     {
@@ -70,9 +85,18 @@ namespace audio_plugin {
         chorusVoiceCountParam = parameters.getRawParameterValue("chorus_voice_count");
         chorusEnabledParam = parameters.getRawParameterValue("chorus_enabled");
         
+        // Initialize stereo parameter pointers
+        chorusStereoModeParam = parameters.getRawParameterValue("chorus_stereo_mode");
+        chorusStereoSpreadParam = parameters.getRawParameterValue("chorus_stereo_spread");
+        
         // Verify global parameter initialization
         if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam) {
             DBG("PluginProcessor: Warning - Some global chorus parameters failed to initialize");
+        }
+        
+        // Verify stereo parameter initialization
+        if (!chorusStereoModeParam || !chorusStereoSpreadParam) {
+            DBG("PluginProcessor: Warning - Some stereo chorus parameters failed to initialize");
         }
         
         DBG("PluginProcessor: Multi-voice Chorus parameters initialized");
@@ -207,6 +231,19 @@ namespace audio_plugin {
         if (chorusMixParam) chorus.setMix(chorusMixParam->load());
         if (chorusBaseDelayParam) chorus.setBaseDelay(chorusBaseDelayParam->load());
         
+        // Update stereo Chorus parameters
+        if (chorusStereoModeParam) {
+            int stereoModeIndex = static_cast<int>(chorusStereoModeParam->load());
+            audio_plugin::Chorus::StereoMode stereoMode = (stereoModeIndex == 0) ? 
+                audio_plugin::Chorus::StereoMode::Mono : 
+                audio_plugin::Chorus::StereoMode::Stereo;
+            chorus.setStereoMode(stereoMode);
+        }
+        
+        if (chorusStereoSpreadParam) {
+            chorus.setStereoSpread(chorusStereoSpreadParam->load());
+        }
+
 		chorus.getVoiceLFO(0)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
 		chorus.getVoiceLFO(1)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
 		chorus.getVoiceLFO(2)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);

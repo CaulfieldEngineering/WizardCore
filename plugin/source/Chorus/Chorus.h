@@ -195,6 +195,19 @@ public:
     float getVoiceMix(int voiceIndex) const;
     float getVoiceBaseDelay(int voiceIndex) const;
     float getVoicePhaseOffset(int voiceIndex) const;
+    DelayLine* getVoiceLeftDelayLine(int voiceIndex);
+    DelayLine* getVoiceRightDelayLine(int voiceIndex);
+
+    enum class StereoMode {
+        Mono,           // Original mono behavior
+        Stereo          // Stereo phase offset mode
+    };
+    
+    // Stereo control methods
+    void setStereoMode(StereoMode mode);
+    void setStereoSpread(float spread);  // 0.0 = mono, 1.0 = maximum stereo
+    StereoMode getStereoMode() const { return currentStereoMode; }
+    float getStereoSpread() const { return stereoSpread; }
 
 private:
     // Internal helper methods
@@ -204,7 +217,7 @@ private:
     // Voice structure
     struct Voice {
         LFO lfo;
-        DelayLine delayLine;
+        std::array<DelayLine, 2> delayLines;  // [0] = left, [1] = right
         std::atomic<bool> enabled{false};
         std::atomic<float> rate{1.0f};
         std::atomic<float> depth{0.5f};
@@ -213,6 +226,10 @@ private:
         std::atomic<float> phaseOffset{0.0f};
         float currentLfoValue{0.0f};
         float currentDelayTime{0.03f};
+        
+        // Stereo phase offsets for left and right channels
+        float leftPhaseOffset{0.0f};
+        float rightPhaseOffset{0.0f};
     };
     
     // Core components - array of voices
@@ -242,6 +259,15 @@ private:
     static constexpr float MAX_DELAY_MS = 10.0f;
     static constexpr float MIN_PHASE_OFFSET = 0.0f;
     static constexpr float MAX_PHASE_OFFSET = 360.0f;
+
+    // Stereo parameters
+    StereoMode currentStereoMode = StereoMode::Mono;
+    float stereoSpread = 0.5f;
+    
+    // Stereo processing methods
+    void processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
+    void processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
+    void updateStereoConfiguration();
 };
 
 } // namespace audio_plugin

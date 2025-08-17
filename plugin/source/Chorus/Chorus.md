@@ -4,6 +4,54 @@
 
 The Chorus module provides a sophisticated multi-voice chorus effect using up to 5 modulated delay lines mixed with the dry signal. Each voice has individual parameters for rate, depth, mix, base delay, and phase offset, allowing for rich, complex chorusing effects.
 
+## Future Development
+
+### High Priority
+1. **Scale to 10 Voices**
+   - Increase MAX_VOICES from 5 to 10
+   - Update voice initialization and management
+   - Optimize performance for increased voice count
+   - Add voice array access methods
+   - Consider SIMD optimization for voice processing
+
+2. **Mid/Side Processing Mode**
+   - Add Mid/Side encoding/decoding
+   - Separate chorus parameters for Mid and Side signals
+   - Independent depth control for Mid vs. Side
+   - Ability to apply different voice counts to Mid and Side
+   - Consider special stereo width enhancement for Side signal
+
+### Core Functionality Enhancements
+1. **Signal Path Extensions**
+   - Per-voice feedback amount control
+   - Cross-voice modulation methods
+   - Filter coefficients interface for external filtering
+   - Modulation source/destination routing matrix
+   - Parallel vs series voice processing modes
+
+2. **Modulation Framework**
+   - External modulation input per parameter
+   - Modulation smoothing time constants
+   - Phase offset matrix between voices
+   - Modulation depth scaling curves
+   - Host tempo sync interface
+
+3. **Performance Optimizations**
+   - SIMD voice processing
+   - Optional voice quality settings
+   - Automatic voice allocation
+   - Dynamic buffer sizing
+   - CPU load reporting interface
+
+### Implementation Notes
+- Voice scaling requires careful memory management
+- Mid/Side processing should be optional with minimal overhead
+- Maintain clean public interface for all features
+- Keep processing functions real-time safe
+- Provide const access methods for parameter inspection
+- Consider thread safety for parameter updates
+- Document CPU scaling characteristics
+
 ## Architecture
 
 ### Core Components
@@ -113,122 +161,130 @@ Each voice has its own delay line:
 - **Latency**: Equal to maximum delay time across all voices
 - **Thread Safety**: Fully thread-safe for audio processing
 
-## Usage Examples
+## Stereo Implementation Options
 
-### Basic Multi-Voice Setup
+The current Chorus implementation processes all channels identically, creating a mono chorus effect. Several approaches exist to implement true stereo chorus with left/right channel separation.
+
+### Stereo Implementation Approaches
+
+#### 1. **Stereo Phase Mode** (Implemented)
+**What it does:** Applies the same LFO modulation to both channels, but with a time delay (phase offset) between left and right.
+
+**Implementation:**
 ```cpp
-Chorus chorus;
-chorus.prepare(48000, 2);  // 48kHz, stereo
+// In Voice struct:
+float leftPhaseOffset = 0.0f;
+float rightPhaseOffset = 45.0f;  // 45° offset
 
-// Enable and configure individual voices
-chorus.setVoiceEnabled(0, true);
-chorus.setVoiceRate(0, 0.8f);       // 0.8 Hz modulation
-chorus.setVoiceDepth(0, 0.5f);      // 50% modulation depth
-chorus.setVoiceMix(0, 0.7f);        // 70% wet, 30% dry
-chorus.setVoiceBaseDelay(0, 30.0f); // 30ms base delay
-chorus.setVoicePhaseOffset(0, 0.0f); // No phase offset
+// In processBlock:
+float baseLfoValue = voice.lfo.getNextSample();
+float leftLfoValue = baseLfoValue;  // Phase 0°
+float rightLfoValue = baseLfoValue + voice.rightPhaseOffset;
 
-// Enable second voice with different parameters
-chorus.setVoiceEnabled(1, true);
-chorus.setVoiceRate(1, 1.2f);       // 1.2 Hz modulation
-chorus.setVoiceDepth(1, 0.4f);      // 40% modulation depth
-chorus.setVoiceMix(1, 0.6f);        // 60% wet, 40% dry
-chorus.setVoiceBaseDelay(1, 35.0f); // 35ms base delay
-chorus.setVoicePhaseOffset(1, 72.0f); // 72° phase offset
+// Same modulation depth, same rate, just offset in time
+float leftDelay = baseDelay + (leftLfoValue - 0.5f) * 2.0f * modulationRange;
+float rightDelay = baseDelay + (rightLfoValue - 0.5f) * 2.0f * modulationRange;
 ```
 
-### Global Parameter Control
+**Pros:** Simple to implement, efficient (5 voices = 5 LFOs), immediate stereo separation
+**Cons:** Left and right channels are correlated but out of sync
+**Audio effect:** Creates a "swirling" stereo image where the chorus effect moves between left and right speakers
+
+### Stereo Control Parameters
+
+#### **Stereo Mode**
+- **Mono**: Original mono behavior (default)
+- **Stereo**: Stereo phase offset mode with symmetrical left/right processing
+
+#### **Stereo Spread**
+- **Range**: 0.0 to 1.0
+- **0.0**: Mono (no stereo separation)
+- **0.5**: Moderate stereo separation (22.5° phase offset)
+- **1.0**: Maximum stereo separation (45° phase offset)
+
+### Usage Examples
+
+#### **Basic Stereo Setup**
 ```cpp
-// Set all enabled voices to same rate
-chorus.setRate(1.0f);
+// Enable stereo mode
+chorus.setStereoMode(Chorus::StereoMode::Stereo);
+chorus.setStereoSpread(0.8f);  // 80% stereo spread
 
-// Set all enabled voices to same depth
-chorus.setDepth(0.6f);
-
-// Set global mix (affects final output)
-chorus.setMix(0.8f);
-```
-
-### Processing Audio
-```cpp
-// In your processBlock function:
+// Process audio
 chorus.processBlock(audioBuffer);
 ```
 
-### Dynamic Voice Management
+#### **Dynamic Stereo Control**
 ```cpp
-// Enable/disable voices dynamically
-chorus.setVoiceEnabled(2, true);   // Enable voice 2
-chorus.setVoiceEnabled(3, false);  // Disable voice 3
+// Switch between mono and stereo
+chorus.setStereoMode(Chorus::StereoMode::Mono);    // Mono processing
+chorus.setStereoMode(Chorus::StereoMode::Stereo);  // Stereo processing
 
-// Check voice status
-bool voice0Enabled = chorus.isVoiceEnabled(0);
+// Adjust stereo width
+chorus.setStereoSpread(0.3f);  // Subtle stereo
+chorus.setStereoSpread(0.7f);  // Moderate stereo
+chorus.setStereoSpread(1.0f);  // Maximum stereo
 ```
 
-## Integration Notes
+### Technical Implementation
 
-### With PluginProcessor
-The multi-voice Chorus module integrates seamlessly with your existing PluginProcessor:
-- No modification of DelayLine or LFO classes required
-- Follows the same parameter validation and error handling patterns
-- Uses the same threading model and safety features
-- Provides both global and per-voice parameter control
+#### **Symmetrical Phase Offsets**
+The stereo implementation uses symmetrical phase offsets to avoid lopsided stereo imaging:
 
-### Parameter Ranges
-All parameters are automatically clamped to their valid ranges:
-- **Rate**: 0.1 Hz to 2.0 Hz
-- **Depth**: 0.0 to 1.0
-- **Mix**: 0.0 to 1.0
-- **Base Delay**: 10ms to 100ms
-- **Phase Offset**: 0° to 360°
-
-### Error Handling
-The module includes comprehensive error checking:
-- Invalid voice indices are rejected with debug output
-- Invalid parameters are rejected with debug output
-- Processing is skipped if not properly prepared
-- Graceful degradation when parameters are out of range
-
-## Advanced Usage Patterns
-
-### Stereo Spread
 ```cpp
-// Create stereo spread with different delays
-chorus.setVoiceBaseDelay(0, 25.0f); // Left voice
-chorus.setVoiceBaseDelay(1, 35.0f); // Right voice
-chorus.setVoicePhaseOffset(0, 0.0f);   // Left phase
-chorus.setVoicePhaseOffset(1, 180.0f); // Right phase (opposite)
+void Chorus::updateStereoConfiguration() {
+    if (currentStereoMode == StereoMode::Stereo) {
+        // Calculate symmetrical phase offsets for stereo
+        float maxPhaseOffset = stereoSpread * 45.0f;  // 0° to 45° max
+        
+        for (int i = 0; i < MAX_VOICES; ++i) {
+            Voice& voice = voices[i];
+            // Set symmetrical phase offsets to avoid lopsidedness
+            voice.leftPhaseOffset = -maxPhaseOffset * 0.5f;   // -22.5° to 0°
+            voice.rightPhaseOffset = maxPhaseOffset * 0.5f;   // 0° to +22.5°
+        }
+    }
+}
 ```
 
-### Frequency Separation
+#### **Processing Modes**
+The chorus automatically switches between processing modes:
+
 ```cpp
-// Different rates for different frequency ranges
-chorus.setVoiceRate(0, 0.5f);  // Slow, deep modulation
-chorus.setVoiceRate(1, 1.5f);  // Fast, bright modulation
+void Chorus::processBlock(juce::AudioBuffer<float>& buffer) {
+    // Switch between mono and stereo processing based on current mode
+    switch (currentStereoMode) {
+        case StereoMode::Mono:
+            processBlockMono(buffer);      // Original mono processing
+            break;
+        case StereoMode::Stereo:
+            processBlockStereo(buffer);    // New stereo processing
+            break;
+        default:
+            processBlockMono(buffer);      // Fallback to mono
+            break;
+    }
+}
 ```
 
-### Dynamic Voice Count
-```cpp
-// Start with one voice, add more for intensity
-chorus.setVoiceEnabled(0, true);
-chorus.setVoiceEnabled(1, false);
-chorus.setVoiceEnabled(2, false);
-// ... enable more voices as needed
+### Benefits of the Current Implementation
+
+1. **No Memory Increase**: Reuses existing DelayLines and LFOs
+2. **Symmetrical Stereo**: Avoids lopsided stereo imaging
+3. **Easy Mode Switching**: Instant switching between mono and stereo
+4. **Maintains Quality**: Preserves all existing chorus functionality
+5. **Efficient Processing**: Minimal CPU overhead for stereo mode
+
+### Future Enhancements
+
+The current stereo implementation can be extended with:
+- **Stereo Spread Mode**: Different modulation depths per channel
+- **Independent LFOs**: Completely separate left/right processing
+- **Mid-Side Processing**: Process mid and side signals separately
+- **Stereo Width Control**: Additional stereo imaging parameters
+
+## Usage Examples
+
+### Basic Multi-Voice Setup
 ```
-
-## Future Enhancements
-
-This multi-voice implementation can be further expanded to include:
-- Different LFO waveforms per voice
-- Voice-specific feedback control
-- More sophisticated modulation patterns
-- Preset management for voice combinations
-- Real-time voice morphing
-- Spectral analysis for adaptive parameters
-
-## Dependencies
-
-- **JUCE Audio Processors**: For audio buffer handling
-- **LFO Module**: For modulation signal generation (5 instances)
-- **DelayLine Module**: For time-varying delays (5 instances)
-- **Standard C++**: For atomic operations, containers, and arrays
+```
