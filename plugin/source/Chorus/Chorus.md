@@ -10,7 +10,7 @@ The **Chorus** is a high-performance, multi-voice modulated delay effect designe
 **Think of a chorus as multiple musicians playing the same melody** with slight timing and pitch variations. The Chorus effect recreates this by using modulated delay lines that continuously vary the pitch and timing of the delayed signal, creating movement, width, and richness in the audio.
 
 ### Key Features
-- **Multi-voice architecture** with up to 5 independent modulated delay lines
+- **Multi-voice architecture** with configurable maximum voices (1-16, default 5)
 - **Dual LFO system** with independent left/right (or mid/side) LFOs per voice for advanced control
 - **Integrated [LFO](../LFO/LFO.md) and [DelayLine](../DelayLine/DelayLine.md) components** for seamless modulation and delay processing
 - **Three stereo processing modes**: Mono, Stereo, and Mid-Side for different spatial effects
@@ -123,6 +123,42 @@ When switching between modes:
 - **Linking LFOs**: Independent parameters sync to global voice parameters
 - **Unlinking LFOs**: Global parameters copied to independent parameters as starting values
 - **Real-time Safe**: All parameter changes are thread-safe and glitch-free
+
+## Configurable Voice Count Architecture
+
+### Dynamic Voice Allocation
+
+The Chorus supports **configurable maximum voice counts** set at construction time:
+- **Range**: 1-16 voices maximum (constructor parameter)
+- **Default**: 5 voices for backward compatibility
+- **Memory**: Dynamic allocation scales with voice count
+- **Performance**: CPU usage scales linearly with maximum voices
+
+### Construction Examples
+
+```cpp
+// Different voice count configurations
+Chorus simpleChorus(2);      // 2-voice chorus for basic stereo widening
+Chorus standardChorus(5);    // Standard 5-voice chorus (default)
+Chorus complexChorus(8);     // 8-voice chorus for rich ensemble effects
+Chorus masteringChorus(12);  // 12-voice chorus for professional mastering
+```
+
+### Memory and Performance Scaling
+
+| Max Voices | Memory Usage | Typical CPU | Use Case |
+|------------|--------------|-------------|----------|
+| 1-2 | ~17-34 KB | Low | Simple effects, mobile |
+| 3-5 | ~52-86 KB | Medium | Standard applications |
+| 6-8 | ~103-137 KB | High | Rich textures |
+| 9-16 | ~154-274 KB | Very High | Professional/mastering |
+
+### Voice Management
+
+- **Active Voices**: Set via `setNumVoices(count)` up to maximum
+- **Runtime Limit**: Cannot exceed constructor-defined maximum
+- **Parameter Validation**: All voice indices checked against maximum
+- **Thread Safety**: Voice count changes are atomic and safe
 
 ### Parameter Behavior Details
 

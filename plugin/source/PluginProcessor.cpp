@@ -51,7 +51,7 @@ namespace audio_plugin {
             std::make_unique<juce::AudioParameterFloat>(
                 "chorus_voice_count",       // parameterID
                 "Number of Voices",         // parameter name
-                juce::NormalisableRange<float>(1.0f, 5.0f, 1.0f), // 1.0 to 5.0, step 1.0
+                juce::NormalisableRange<float>(1.0f, 10.0f, 1.0f), // 1.0 to 5.0, step 1.0 (max supported by this instance)
                 1.0f                        // default value
             ),
             
@@ -97,7 +97,8 @@ namespace audio_plugin {
                 juce::AudioParameterFloatAttributes()
                     .withLabel("dB")
             )
-        })
+        }),
+        chorus(10)  // Initialize chorus with 5 voices maximum
     {
         // Initialize global parameter pointers for quick access
         chorusRateParam = parameters.getRawParameterValue("chorus_rate");

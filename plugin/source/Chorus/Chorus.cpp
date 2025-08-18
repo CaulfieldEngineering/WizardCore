@@ -3,7 +3,7 @@
 
 namespace audio_plugin {
 
-Chorus::Chorus() {
+Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX_VOICES, maxVoicesIn)) {
     // Initialize with default values for global parameters
     rate = 1.0f;
     depth = 0.5f;
@@ -12,14 +12,17 @@ Chorus::Chorus() {
     sampleRate = 44100.0;
     prepared = false;
     
+    // Allocate voices array
+    voices = std::make_unique<Voice[]>(maxVoices);
+    
     // Initialize all voices with default values
-    for (int i = 0; i < MAX_VOICES; ++i) {
+    for (int i = 0; i < maxVoices; ++i) {
         voices[i].enabled = (i == 0); // Only first voice enabled by default
         voices[i].rate = 0.8f + (i * 0.15f); // Slightly different rates for each voice (0.8, 0.95, 1.1, 1.25, 1.4)
         voices[i].depth = 0.5f;
         voices[i].mix = 0.5f - (i * 0.1f); // Decreasing mix for each voice (0.5, 0.4, 0.3, 0.2, 0.1)
         voices[i].baseDelay = 30.0f + (i * 3.0f); // Slightly different delays for each voice (30, 33, 36, 39, 42)
-        voices[i].phaseOffset = i * 72.0f; // 72 degrees apart (360/5)
+        voices[i].phaseOffset = maxVoices > 1 ? i * (360.0f / maxVoices) : 0.0f; // Evenly distribute phases
         voices[i].currentLfoValue = 0.0f;
         voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
         
@@ -62,7 +65,7 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
     sampleRate = sampleRateIn;
     
     // Prepare each voice
-    for (int i = 0; i < MAX_VOICES; ++i) {
+    for (int i = 0; i < maxVoices; ++i) {
         Voice& voice = voices[i];
         
         // Prepare both LFOs with baked-in parameters for chorus effect
@@ -105,12 +108,12 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
     prepared = true;
     
     // DBG("Chorus: Prepared successfully with sample rate: " << sampleRateIn 
-    //     << ", channels: " << numChannels << ", voices: " << MAX_VOICES);
+    //     << ", channels: " << numChannels << ", voices: " << maxVoices);
 }
 
 // Voice management methods
 void Chorus::setVoiceEnabled(int voiceIndex, bool enabled) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -121,20 +124,20 @@ void Chorus::setVoiceEnabled(int voiceIndex, bool enabled) {
 }
 
 bool Chorus::isVoiceEnabled(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return false;
     }
     return voices[voiceIndex].enabled.load();
 }
 
 void Chorus::setNumVoices(int numVoices) {
-    if (numVoices < 1 || numVoices > MAX_VOICES) {
-        DBG("Chorus: Invalid number of voices: " << numVoices << " (must be 1-" << MAX_VOICES << ")");
+    if (numVoices < 1 || numVoices > maxVoices) {
+        DBG("Chorus: Invalid number of voices: " << numVoices << " (must be 1-" << maxVoices << ")");
         return;
     }
     
     // Enable the first numVoices voices, disable the rest
-    for (int i = 0; i < MAX_VOICES; ++i) {
+    for (int i = 0; i < maxVoices; ++i) {
         voices[i].enabled = (i < numVoices);
     }
     
@@ -147,8 +150,12 @@ int Chorus::getNumVoices() const {
     return numActiveVoices.load();
 }
 
+int Chorus::getMaxVoices() const {
+    return maxVoices;
+}
+
 LFO* Chorus::getVoiceLFO(int voiceIndex) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return nullptr;
     }
     // Return left/mid LFO for backward compatibility
@@ -156,21 +163,21 @@ LFO* Chorus::getVoiceLFO(int voiceIndex) {
 }
 
 LFO* Chorus::getVoiceLeftLFO(int voiceIndex) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return nullptr;
     }
     return &voices[voiceIndex].lfos[0];
 }
 
 LFO* Chorus::getVoiceRightLFO(int voiceIndex) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return nullptr;
     }
     return &voices[voiceIndex].lfos[1];
 }
 
 DelayLine* Chorus::getVoiceLeftDelayLine(int voiceIndex) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Invalid voice index for DelayLine access: " << voiceIndex);
         return nullptr;
     }
@@ -178,7 +185,7 @@ DelayLine* Chorus::getVoiceLeftDelayLine(int voiceIndex) {
 }
 
 DelayLine* Chorus::getVoiceRightDelayLine(int voiceIndex) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Invalid voice index for DelayLine access: " << voiceIndex);
         return nullptr;
     }
@@ -187,42 +194,42 @@ DelayLine* Chorus::getVoiceRightDelayLine(int voiceIndex) {
 
 // Independent LFO getters
 float Chorus::getVoiceLeftRate(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].leftRate.load();
 }
 
 float Chorus::getVoiceRightRate(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].rightRate.load();
 }
 
 float Chorus::getVoiceLeftDepth(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].leftDepth.load();
 }
 
 float Chorus::getVoiceRightDepth(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].rightDepth.load();
 }
 
 float Chorus::getVoiceLeftPhaseOffset(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].leftPhaseOffset.load();
 }
 
 float Chorus::getVoiceRightPhaseOffset(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].rightPhaseOffset.load();
@@ -230,7 +237,7 @@ float Chorus::getVoiceRightPhaseOffset(int voiceIndex) const {
 
 // Per-voice parameter setters
 void Chorus::setVoiceRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -258,7 +265,7 @@ void Chorus::setVoiceRate(int voiceIndex, float rateInHz) {
 }
 
 void Chorus::setVoiceDepth(int voiceIndex, float depthIn) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -280,7 +287,7 @@ void Chorus::setVoiceDepth(int voiceIndex, float depthIn) {
 }
 
 void Chorus::setVoiceMix(int voiceIndex, float mixIn) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -296,7 +303,7 @@ void Chorus::setVoiceMix(int voiceIndex, float mixIn) {
 }
 
 void Chorus::setVoiceBaseDelay(int voiceIndex, float delayMs) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -320,7 +327,7 @@ void Chorus::setVoiceBaseDelay(int voiceIndex, float delayMs) {
 }
 
 void Chorus::setVoicePhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -338,7 +345,7 @@ void Chorus::setVoicePhaseOffset(int voiceIndex, float phaseOffset) {
 
 // Independent LFO control methods
 void Chorus::setVoiceLFOLinked(int voiceIndex, bool linked) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -361,14 +368,14 @@ void Chorus::setVoiceLFOLinked(int voiceIndex, bool linked) {
 }
 
 bool Chorus::isVoiceLFOLinked(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return true; // Default to linked for invalid index
     }
     return voices[voiceIndex].lfoLinked.load();
 }
 
 void Chorus::setVoiceLeftRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -382,7 +389,7 @@ void Chorus::setVoiceLeftRate(int voiceIndex, float rateInHz) {
 }
 
 void Chorus::setVoiceRightRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -396,7 +403,7 @@ void Chorus::setVoiceRightRate(int voiceIndex, float rateInHz) {
 }
 
 void Chorus::setVoiceLeftDepth(int voiceIndex, float depth) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -406,7 +413,7 @@ void Chorus::setVoiceLeftDepth(int voiceIndex, float depth) {
 }
 
 void Chorus::setVoiceRightDepth(int voiceIndex, float depth) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -416,7 +423,7 @@ void Chorus::setVoiceRightDepth(int voiceIndex, float depth) {
 }
 
 void Chorus::setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -430,7 +437,7 @@ void Chorus::setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset) {
 }
 
 void Chorus::setVoiceRightPhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
@@ -580,7 +587,7 @@ void Chorus::processBlock(juce::AudioBuffer<float>& buffer) {
     
     // Normalize wet buffer by number of active voices to prevent volume buildup
     int activeVoiceCount = 0;
-    for (int i = 0; i < MAX_VOICES; ++i) {
+    for (int i = 0; i < maxVoices; ++i) {
         if (voices[i].enabled.load()) {
             activeVoiceCount++;
         }
@@ -626,7 +633,7 @@ void Chorus::processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuff
     }
     
     // Process each enabled voice
-    for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex) {
+    for (int voiceIndex = 0; voiceIndex < maxVoices; ++voiceIndex) {
         Voice& voice = voices[voiceIndex];
         
         if (!voice.enabled.load()) {
@@ -683,7 +690,7 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
     }
     
     // Process each enabled voice
-    for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex) {
+    for (int voiceIndex = 0; voiceIndex < maxVoices; ++voiceIndex) {
         Voice& voice = voices[voiceIndex];
         
         if (!voice.enabled.load()) {
@@ -794,7 +801,7 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
     }
     
     // Process each enabled voice
-    for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex) {
+    for (int voiceIndex = 0; voiceIndex < maxVoices; ++voiceIndex) {
         Voice& voice = voices[voiceIndex];
         
         if (!voice.enabled.load()) {
@@ -917,7 +924,7 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
 
 void Chorus::clear() {
     if (prepared.load()) {
-        for (int i = 0; i < MAX_VOICES; ++i) {
+        for (int i = 0; i < maxVoices; ++i) {
             for (int channel = 0; channel < 2; ++channel) {
                 voices[i].delayLines[channel].clear();
             }
@@ -938,35 +945,35 @@ bool Chorus::isPrepared() const {
 
 // Per-voice getters
 float Chorus::getVoiceRate(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].rate.load();
 }
 
 float Chorus::getVoiceDepth(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].depth.load();
 }
 
 float Chorus::getVoiceMix(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].mix.load();
 }
 
 float Chorus::getVoiceBaseDelay(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].baseDelay.load();
 }
 
 float Chorus::getVoicePhaseOffset(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
     return voices[voiceIndex].phaseOffset.load();
@@ -1011,7 +1018,7 @@ void Chorus::updateStereoConfiguration() {
         float spreadCurve = std::pow(stereoSpread, 0.5f); // Square root curve for more dramatic effect at lower values
         float maxPhaseOffset = spreadCurve * 360.0f;  // 0° to 360° max
         
-        for (int i = 0; i < MAX_VOICES; ++i) {
+        for (int i = 0; i < maxVoices; ++i) {
             Voice& voice = voices[i];
             
             // At 0% spread: both channels get 0° offset (mono)
@@ -1034,7 +1041,7 @@ void Chorus::updateStereoConfiguration() {
         float spreadCurve = std::pow(stereoSpread, 0.5f); // Square root curve for more dramatic effect at lower values
         float maxPhaseOffset = spreadCurve * 360.0f;  // 0° to 360° max
         
-        for (int i = 0; i < MAX_VOICES; ++i) {
+        for (int i = 0; i < maxVoices; ++i) {
             Voice& voice = voices[i];
             
             // At 0% spread: both mid and side get 0° offset (mono)
@@ -1053,7 +1060,7 @@ void Chorus::updateStereoConfiguration() {
         }
     } else {
         // In mono mode, ensure no phase offsets
-        for (int i = 0; i < MAX_VOICES; ++i) {
+        for (int i = 0; i < maxVoices; ++i) {
             Voice& voice = voices[i];
             voice.leftPhaseOffset = 0.0f;
             voice.rightPhaseOffset = 0.0f;

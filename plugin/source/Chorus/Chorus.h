@@ -10,7 +10,7 @@ namespace audio_plugin {
 /**
  * @brief A multi-voice chorus effect using modulated delay lines
  * 
- * This class provides a chorus effect with up to 5 modulated delay lines
+ * This class provides a chorus effect with up to configurable number of modulated delay lines
  * mixed with the dry signal. Each voice has individual parameters for
  * rate, depth, mix, base delay, and phase offset.
  * 
@@ -19,7 +19,7 @@ namespace audio_plugin {
  * 
  * Usage Example:
  * @code
- * Chorus chorus;
+ * Chorus chorus(3);  // Create chorus with 3 voices maximum
  * chorus.prepare(48000, 2);  // 48kHz, stereo
  * chorus.setVoiceEnabled(0, true);  // Enable first voice
  * chorus.setVoiceRate(0, 1.0);      // 1 Hz modulation for voice 0
@@ -33,9 +33,10 @@ namespace audio_plugin {
 class Chorus {
 public:
     /**
-     * @brief Default constructor
+     * @brief Constructor with configurable maximum voices
+     * @param maxVoices Maximum number of voices (1-16, default 5)
      */
-    Chorus();
+    explicit Chorus(int maxVoices = 5);
     
     /**
      * @brief Destructor
@@ -78,6 +79,12 @@ public:
      * @return Number of currently enabled voices
      */
     int getNumVoices() const;
+    
+    /**
+     * @brief Get the maximum number of voices supported by this instance
+     * @return Maximum number of voices
+     */
+    int getMaxVoices() const;
     
     /**
      * @brief Get direct access to a voice's LFO instance
@@ -337,8 +344,9 @@ private:
         float sidePhaseOffset{0.0f};
     };
     
-    // Core components - array of voices
-    std::array<Voice, 5> voices;
+    // Core components - dynamic array of voices
+    std::unique_ptr<Voice[]> voices;
+    const int maxVoices;  // Maximum number of voices (set at construction)
     
     // Global parameters (thread-safe using atomics)
     std::atomic<float> rate{1.0f};
@@ -351,7 +359,9 @@ private:
     std::atomic<bool> enabled{true};
     
     // Constants
-    static constexpr int MAX_VOICES = 5;
+    static constexpr int DEFAULT_MAX_VOICES = 5;
+    static constexpr int MIN_MAX_VOICES = 1;
+    static constexpr int MAX_MAX_VOICES = 16;
     static constexpr float MIN_RATE = 0.1f;
     static constexpr float MAX_RATE = 2.0f;
     static constexpr float MIN_DEPTH = 0.0f;

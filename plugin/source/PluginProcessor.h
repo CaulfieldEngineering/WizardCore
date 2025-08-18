@@ -63,7 +63,7 @@ private:
 		//juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedMix;
 
 	// Chorus ============================================================
-	Chorus chorus;
+	Chorus chorus;  // Initialized with 5 voices in constructor
 	
 	// Global Chorus parameter pointers for quick access
 	std::atomic<float>* chorusRateParam = nullptr;
