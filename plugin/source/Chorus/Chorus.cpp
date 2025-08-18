@@ -23,14 +23,29 @@ Chorus::Chorus() {
         voices[i].currentLfoValue = 0.0f;
         voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
         
-        // Initialize stereo phase offsets
+        // Initialize independent LFO parameters (start linked for backward compatibility)
+        voices[i].lfoLinked = true;
+        voices[i].leftRate = voices[i].rate.load();
+        voices[i].rightRate = voices[i].rate.load();
+        voices[i].leftDepth = voices[i].depth.load();
+        voices[i].rightDepth = voices[i].depth.load();
         voices[i].leftPhaseOffset = 0.0f;
         voices[i].rightPhaseOffset = 0.0f;
+        
+        // Initialize mid-side phase offsets for backward compatibility
+        voices[i].midPhaseOffset = 0.0f;
+        voices[i].sidePhaseOffset = 0.0f;
     }
     
     // Initialize stereo configuration with default values
     currentStereoMode = StereoMode::Mono;
     stereoSpread = 0.5f;
+    
+    // Initialize mid-side configuration with default values
+    midEnabled = true;
+    sideEnabled = true;
+    sideGainDb = 0.0f;
+    
     updateStereoConfiguration();
 }
 
@@ -50,15 +65,26 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
     for (int i = 0; i < MAX_VOICES; ++i) {
         Voice& voice = voices[i];
         
-        // Prepare LFO with baked-in parameters for chorus effect
-        voice.lfo.prepare(sampleRateIn);
-        
-        // Set LFO to sine wave with typical chorus settings
-        voice.lfo.setWaveShape(LFO::WaveformType::Sine);
-        voice.lfo.setInvert(false);
-        voice.lfo.setSymmetry(50.0f);  // 50% = symmetric
-        voice.lfo.setPhaseOffset(voice.phaseOffset.load()); // Individual phase offset
-        voice.lfo.setSyncToHost(false);
+        // Prepare both LFOs with baked-in parameters for chorus effect
+        for (int lfoIndex = 0; lfoIndex < 2; ++lfoIndex) {
+            voice.lfos[lfoIndex].prepare(sampleRateIn);
+            
+            // Set LFO to sine wave with typical chorus settings
+            voice.lfos[lfoIndex].setWaveShape(LFO::WaveformType::Sine);
+            voice.lfos[lfoIndex].setInvert(false);
+            voice.lfos[lfoIndex].setSymmetry(50.0f);  // 50% = symmetric
+            voice.lfos[lfoIndex].setSyncToHost(false);
+            voice.lfos[lfoIndex].setCoupling(LFO::CouplingType::AC);  // Use AC coupling for bipolar output [-1,1]
+            
+            // Set individual phase offsets - for linked mode, use voice phase offset
+            if (voice.lfoLinked.load()) {
+                voice.lfos[lfoIndex].setPhaseOffset(voice.phaseOffset.load());
+            } else {
+                // Use independent phase offsets
+                float phaseOffset = (lfoIndex == 0) ? voice.leftPhaseOffset.load() : voice.rightPhaseOffset.load();
+                voice.lfos[lfoIndex].setPhaseOffset(phaseOffset);
+            }
+        }
         
         // Prepare delay lines with maximum delay time needed
         // Base delay + max modulation depth = max possible delay
@@ -123,10 +149,24 @@ int Chorus::getNumVoices() const {
 
 LFO* Chorus::getVoiceLFO(int voiceIndex) {
     if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
-        DBG("Chorus: Invalid voice index for LFO access: " << voiceIndex);
         return nullptr;
     }
-    return &voices[voiceIndex].lfo;
+    // Return left/mid LFO for backward compatibility
+    return &voices[voiceIndex].lfos[0];
+}
+
+LFO* Chorus::getVoiceLeftLFO(int voiceIndex) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return nullptr;
+    }
+    return &voices[voiceIndex].lfos[0];
+}
+
+LFO* Chorus::getVoiceRightLFO(int voiceIndex) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return nullptr;
+    }
+    return &voices[voiceIndex].lfos[1];
 }
 
 DelayLine* Chorus::getVoiceLeftDelayLine(int voiceIndex) {
@@ -145,6 +185,49 @@ DelayLine* Chorus::getVoiceRightDelayLine(int voiceIndex) {
     return &voices[voiceIndex].delayLines[1];
 }
 
+// Independent LFO getters
+float Chorus::getVoiceLeftRate(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].leftRate.load();
+}
+
+float Chorus::getVoiceRightRate(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].rightRate.load();
+}
+
+float Chorus::getVoiceLeftDepth(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].leftDepth.load();
+}
+
+float Chorus::getVoiceRightDepth(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].rightDepth.load();
+}
+
+float Chorus::getVoiceLeftPhaseOffset(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].leftPhaseOffset.load();
+}
+
+float Chorus::getVoiceRightPhaseOffset(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return 0.0f;
+    }
+    return voices[voiceIndex].rightPhaseOffset.load();
+}
+
 // Per-voice parameter setters
 void Chorus::setVoiceRate(int voiceIndex, float rateInHz) {
     if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
@@ -158,7 +241,18 @@ void Chorus::setVoiceRate(int voiceIndex, float rateInHz) {
     }
     
     voices[voiceIndex].rate = rateInHz;
-    voices[voiceIndex].lfo.setFrequency(static_cast<double>(rateInHz));
+    
+    // Update LFO frequency if already prepared
+    if (prepared.load()) {
+        if (voices[voiceIndex].lfoLinked.load()) {
+            voices[voiceIndex].lfos[0].setFrequency(static_cast<double>(rateInHz));
+            voices[voiceIndex].lfos[1].setFrequency(static_cast<double>(rateInHz));
+            
+            // Sync independent parameters when linked
+            voices[voiceIndex].leftRate = rateInHz;
+            voices[voiceIndex].rightRate = rateInHz;
+        }
+    }
     
     // DBG("Chorus: Voice " << voiceIndex << " rate set to " << rateInHz << " Hz");
 }
@@ -175,6 +269,12 @@ void Chorus::setVoiceDepth(int voiceIndex, float depthIn) {
     }
     
     voices[voiceIndex].depth = depthIn;
+    
+    // Sync independent depth parameters when linked
+    if (voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].leftDepth = depthIn;
+        voices[voiceIndex].rightDepth = depthIn;
+    }
     
     // DBG("Chorus: Voice " << voiceIndex << " depth set to " << depthIn);
 }
@@ -225,19 +325,122 @@ void Chorus::setVoicePhaseOffset(int voiceIndex, float phaseOffset) {
         return;
     }
     
-    if (phaseOffset < MIN_PHASE_OFFSET || phaseOffset > MAX_PHASE_OFFSET) {
-        DBG("Chorus: Phase offset out of range: " << phaseOffset << " degrees");
+    // Clamp phase offset to valid range
+    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
+    voices[voiceIndex].phaseOffset = phaseOffset;
+    
+    // Update both LFOs if linked
+    if (voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].lfos[0].setPhaseOffset(phaseOffset);
+        voices[voiceIndex].lfos[1].setPhaseOffset(phaseOffset);
+    }
+}
+
+// Independent LFO control methods
+void Chorus::setVoiceLFOLinked(int voiceIndex, bool linked) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
         return;
     }
     
-    voices[voiceIndex].phaseOffset = phaseOffset;
+    voices[voiceIndex].lfoLinked = linked;
     
-    // Update LFO phase offset if already prepared
-    if (prepared.load()) {
-        voices[voiceIndex].lfo.setPhaseOffset(phaseOffset);
+    if (linked) {
+        // When linking, sync independent parameters to global voice parameters
+        voices[voiceIndex].leftRate = voices[voiceIndex].rate.load();
+        voices[voiceIndex].rightRate = voices[voiceIndex].rate.load();
+        voices[voiceIndex].leftDepth = voices[voiceIndex].depth.load();
+        voices[voiceIndex].rightDepth = voices[voiceIndex].depth.load();
+        voices[voiceIndex].leftPhaseOffset = voices[voiceIndex].phaseOffset.load();
+        voices[voiceIndex].rightPhaseOffset = voices[voiceIndex].phaseOffset.load();
+        
+        // Update LFO parameters
+        voices[voiceIndex].lfos[0].setPhaseOffset(voices[voiceIndex].phaseOffset.load());
+        voices[voiceIndex].lfos[1].setPhaseOffset(voices[voiceIndex].phaseOffset.load());
+    }
+}
+
+bool Chorus::isVoiceLFOLinked(int voiceIndex) const {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        return true; // Default to linked for invalid index
+    }
+    return voices[voiceIndex].lfoLinked.load();
+}
+
+void Chorus::setVoiceLeftRate(int voiceIndex, float rateInHz) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
     }
     
-    // DBG("Chorus: Voice " << voiceIndex << " phase offset set to " << phaseOffset << " degrees");
+    rateInHz = juce::jlimit(MIN_RATE, MAX_RATE, rateInHz);
+    voices[voiceIndex].leftRate = rateInHz;
+    
+    if (!voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].lfos[0].setFrequency(rateInHz);
+    }
+}
+
+void Chorus::setVoiceRightRate(int voiceIndex, float rateInHz) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
+    }
+    
+    rateInHz = juce::jlimit(MIN_RATE, MAX_RATE, rateInHz);
+    voices[voiceIndex].rightRate = rateInHz;
+    
+    if (!voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].lfos[1].setFrequency(rateInHz);
+    }
+}
+
+void Chorus::setVoiceLeftDepth(int voiceIndex, float depth) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
+    }
+    
+    depth = juce::jlimit(MIN_DEPTH, MAX_DEPTH, depth);
+    voices[voiceIndex].leftDepth = depth;
+}
+
+void Chorus::setVoiceRightDepth(int voiceIndex, float depth) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
+    }
+    
+    depth = juce::jlimit(MIN_DEPTH, MAX_DEPTH, depth);
+    voices[voiceIndex].rightDepth = depth;
+}
+
+void Chorus::setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
+    }
+    
+    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
+    voices[voiceIndex].leftPhaseOffset = phaseOffset;
+    
+    if (!voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].lfos[0].setPhaseOffset(phaseOffset);
+    }
+}
+
+void Chorus::setVoiceRightPhaseOffset(int voiceIndex, float phaseOffset) {
+    if (voiceIndex < 0 || voiceIndex >= MAX_VOICES) {
+        DBG("Chorus: Voice index out of range: " << voiceIndex);
+        return;
+    }
+    
+    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
+    voices[voiceIndex].rightPhaseOffset = phaseOffset;
+    
+    if (!voices[voiceIndex].lfoLinked.load()) {
+        voices[voiceIndex].lfos[1].setPhaseOffset(phaseOffset);
+    }
 }
 
 // Global parameter setters (affect all voices)
@@ -253,7 +456,16 @@ void Chorus::setRate(float rateInHz) {
     int currentVoiceCount = numActiveVoices.load();
     for (int i = 0; i < currentVoiceCount; ++i) {
         voices[i].rate = rateInHz;
-        voices[i].lfo.setFrequency(static_cast<double>(rateInHz));
+        
+        // Update both LFOs if linked, otherwise only update linked parameters
+        if (voices[i].lfoLinked.load()) {
+            voices[i].lfos[0].setFrequency(static_cast<double>(rateInHz));
+            voices[i].lfos[1].setFrequency(static_cast<double>(rateInHz));
+            
+            // Sync independent parameters when linked
+            voices[i].leftRate = rateInHz;
+            voices[i].rightRate = rateInHz;
+        }
     }
     
     // DBG("Chorus: Global rate set to " << rateInHz << " Hz");
@@ -271,6 +483,12 @@ void Chorus::setDepth(float depthIn) {
     int currentVoiceCount = numActiveVoices.load();
     for (int i = 0; i < currentVoiceCount; ++i) {
         voices[i].depth = depthIn;
+        
+        // Sync independent depth parameters when linked
+        if (voices[i].lfoLinked.load()) {
+            voices[i].leftDepth = depthIn;
+            voices[i].rightDepth = depthIn;
+        }
     }
     
     // DBG("Chorus: Global depth set to " << depthIn);
@@ -344,13 +562,16 @@ void Chorus::processBlock(juce::AudioBuffer<float>& buffer) {
     juce::AudioBuffer<float> wetBuffer(numChannels, numSamples);
     wetBuffer.clear();
     
-    // Switch between mono and stereo processing based on current mode
+    // Switch between mono, stereo, and mid-side processing based on current mode
     switch (currentStereoMode) {
         case StereoMode::Mono:
             processVoicesMono(buffer, wetBuffer);
             break;
         case StereoMode::Stereo:
             processVoicesStereo(buffer, wetBuffer);
+            break;
+        case StereoMode::MidSide:
+            processVoicesMidSide(buffer, wetBuffer);
             break;
         default:
             processVoicesMono(buffer, wetBuffer);  // Fallback to mono
@@ -414,12 +635,27 @@ void Chorus::processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuff
         
         // Process each sample for this voice
         for (int sample = 0; sample < numSamples; ++sample) {
-            // Get LFO value for this sample
-            float lfoValue = voice.lfo.getNextSample();
+            // Get LFO value for this sample - use left/mid LFO for mono processing
+            float lfoValue;
+            if (voice.lfoLinked.load()) {
+                // Use left LFO with global voice parameters
+                lfoValue = voice.lfos[0].getNextSample();
+            } else {
+                // Use independent left LFO parameters
+                lfoValue = voice.lfos[0].getNextSample();
+            }
             
-            // Calculate modulated delay time
-            float modulationRange = voice.depth.load() * MAX_DELAY_MS * 0.001f; // Convert to seconds
-            float modulatedDelay = voice.baseDelay.load() * 0.001f + (lfoValue - 0.5f) * 2.0f * modulationRange;
+            // Calculate modulated delay time (simplified with AC coupling)
+            float modulationRange;
+            if (voice.lfoLinked.load()) {
+                modulationRange = voice.depth.load() * MAX_DELAY_MS * 0.001f; // Convert to seconds
+            } else {
+                // Use average of left and right depths for mono mode
+                float avgDepth = (voice.leftDepth.load() + voice.rightDepth.load()) * 0.5f;
+                modulationRange = avgDepth * MAX_DELAY_MS * 0.001f;
+            }
+            
+            float modulatedDelay = voice.baseDelay.load() * 0.001f + lfoValue * modulationRange;
             
             // Clamp delay time to valid range
             modulatedDelay = std::max(0.001f, std::min(modulatedDelay, 0.1f)); // 1ms to 100ms
@@ -456,37 +692,54 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
         
         // Get base delay and calculate modulation parameters
         float baseDelayMs = voice.baseDelay.load();
-        float modulationRange = voice.depth.load() * MAX_DELAY_MS * 0.001f; // Convert to seconds
-        
-        // Adjust modulation range based on base delay to prevent artifacts
-        if (baseDelayMs < 45.0f) {
-            // Reduce modulation range for low base delays
-            float scaleFactor = juce::jmap(baseDelayMs, 10.0f, 45.0f, 0.4f, 1.0f);
-            modulationRange *= scaleFactor;
-        }
         
         // Process each sample for this voice
         for (int sample = 0; sample < numSamples; ++sample) {
-            // Get base LFO value for this sample
-            float baseLfoValue = voice.lfo.getNextSample();
-            
             // Get input samples for both channels
             const float* channelData[2] = { buffer.getReadPointer(0), buffer.getReadPointer(1) };
             float* wetData[2] = { wetBuffer.getWritePointer(0), wetBuffer.getWritePointer(1) };
             
-            // Process each channel
-            for (int channel = 0; channel < 2; ++channel) {
-                // Calculate phase-shifted LFO value for this channel
-                float phaseOffset = (channel == 0) ? voice.leftPhaseOffset : voice.rightPhaseOffset;
-                float phasedLfoValue = baseLfoValue + (phaseOffset / 360.0f);
+            // Get LFO values for this sample
+            float lfoValues[2];
+            float depths[2];
+            
+            if (voice.lfoLinked.load()) {
+                // Use shared LFO with phase offsets for stereo effect
+                float baseLfoValue = voice.lfos[0].getNextSample();
                 
-                // Wrap to [0, 1] range
-                phasedLfoValue = std::fmod(phasedLfoValue, 1.0f);
-                if (phasedLfoValue < 0.0f) phasedLfoValue += 1.0f;
+                for (int channel = 0; channel < 2; ++channel) {
+                    float phaseOffset = (channel == 0) ? voice.leftPhaseOffset : voice.rightPhaseOffset;
+                    lfoValues[channel] = baseLfoValue + (phaseOffset / 360.0f);
+                    
+                    // Wrap to appropriate range (assuming AC coupling gives [-1, 1])
+                    lfoValues[channel] = std::fmod(lfoValues[channel], 2.0f);
+                    if (lfoValues[channel] > 1.0f) lfoValues[channel] -= 2.0f;
+                    if (lfoValues[channel] < -1.0f) lfoValues[channel] += 2.0f;
+                    
+                    depths[channel] = voice.depth.load();
+                }
+            } else {
+                // Use independent LFOs for each channel
+                lfoValues[0] = voice.lfos[0].getNextSample();
+                lfoValues[1] = voice.lfos[1].getNextSample();
+                depths[0] = voice.leftDepth.load();
+                depths[1] = voice.rightDepth.load();
+            }
+            
+            // Process each channel with independent parameters
+            for (int channel = 0; channel < 2; ++channel) {
+                // Calculate modulation range
+                float modulationRange = depths[channel] * MAX_DELAY_MS * 0.001f;
+                
+                // Adjust modulation range based on base delay to prevent artifacts
+                if (baseDelayMs < 45.0f) {
+                    float scaleFactor = juce::jmap(baseDelayMs, 10.0f, 45.0f, 0.4f, 1.0f);
+                    modulationRange *= scaleFactor;
+                }
                 
                 // Calculate delay time for this channel
                 float baseDelaySec = baseDelayMs * 0.001f;
-                float modulation = (phasedLfoValue - 0.5f) * 2.0f * modulationRange;
+                float modulation = lfoValues[channel] * modulationRange;
                 
                 // Apply non-linear modulation scaling for smoother pitch variations
                 modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
@@ -507,13 +760,170 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
     }
 }
 
+void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer) {
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    
+    if (numSamples <= 0 || numChannels < 2) {
+        // Mid-side processing requires stereo input
+        return;
+    }
+    
+    // Create temporary buffers for mid-side conversion
+    juce::AudioBuffer<float> midSideBuffer(2, numSamples);
+    juce::AudioBuffer<float> midSideWetBuffer(2, numSamples);
+    midSideBuffer.clear();
+    midSideWetBuffer.clear();
+    
+    // Get pointers for mid and side channels
+    const float* midSideData[2] = { midSideBuffer.getReadPointer(0), midSideBuffer.getReadPointer(1) };
+    float* midSideWetData[2] = { midSideWetBuffer.getWritePointer(0), midSideWetBuffer.getWritePointer(1) };
+    
+    // Convert L/R to M/S
+    for (int sample = 0; sample < numSamples; ++sample) {
+        float left = buffer.getSample(0, sample);
+        float right = buffer.getSample(1, sample);
+        
+        // M/S encoding: Mid = (L+R), Side = (L-R)
+        // Note: We don't divide by 2 here to maintain proper amplitude
+        float mid = left + right;
+        float side = left - right;
+        
+        midSideBuffer.setSample(0, sample, mid);   // Mid channel
+        midSideBuffer.setSample(1, sample, side);  // Side channel
+    }
+    
+    // Process each enabled voice
+    for (int voiceIndex = 0; voiceIndex < MAX_VOICES; ++voiceIndex) {
+        Voice& voice = voices[voiceIndex];
+        
+        if (!voice.enabled.load()) {
+            continue;
+        }
+        
+        // Get base delay and calculate modulation parameters
+        float baseDelayMs = voice.baseDelay.load();
+        
+        // Process each sample for this voice
+        for (int sample = 0; sample < numSamples; ++sample) {
+            // Get LFO values for this sample (one per LFO)
+            float midLfoValue, sideLfoValue;
+            float midDepth, sideDepth;
+            
+            if (voice.lfoLinked.load()) {
+                // Use single LFO with phase offsets for backward compatibility
+                float baseLfoValue = voice.lfos[0].getNextSample();
+                
+                // Calculate mid channel LFO value
+                float midPhaseOffset = voice.midPhaseOffset;
+                midLfoValue = baseLfoValue + (midPhaseOffset / 360.0f);
+                
+                // Wrap to appropriate range (assuming AC coupling gives [-1, 1])
+                midLfoValue = std::fmod(midLfoValue, 2.0f);
+                if (midLfoValue > 1.0f) midLfoValue -= 2.0f;
+                if (midLfoValue < -1.0f) midLfoValue += 2.0f;
+                
+                // Calculate side channel LFO value
+                float sidePhaseOffset = voice.sidePhaseOffset;
+                sideLfoValue = baseLfoValue + (sidePhaseOffset / 360.0f);
+                
+                // Wrap to appropriate range
+                sideLfoValue = std::fmod(sideLfoValue, 2.0f);
+                if (sideLfoValue > 1.0f) sideLfoValue -= 2.0f;
+                if (sideLfoValue < -1.0f) sideLfoValue += 2.0f;
+                
+                midDepth = voice.depth.load();
+                sideDepth = voice.depth.load();
+            } else {
+                // Use independent LFOs
+                midLfoValue = voice.lfos[0].getNextSample();  // Mid/left LFO
+                sideLfoValue = voice.lfos[1].getNextSample(); // Side/right LFO
+                midDepth = voice.leftDepth.load();
+                sideDepth = voice.rightDepth.load();
+            }
+            
+            // Process mid channel (channel 0) if enabled
+            if (midEnabled) {
+                // Calculate delay time for mid channel
+                float modulationRange = midDepth * MAX_DELAY_MS * 0.001f;
+                float baseDelaySec = baseDelayMs * 0.001f;
+                float modulation = midLfoValue * modulationRange;
+                
+                // Apply non-linear modulation scaling for smoother pitch variations
+                modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
+                
+                float midDelay = baseDelaySec + modulation;
+                
+                // Clamp delay time to valid range
+                midDelay = std::max(0.001f, std::min(midDelay, 0.1f)); // 1ms to 100ms
+                
+                // Update delay time and process sample
+                voice.delayLines[0].setDelayTime(midDelay);
+                float delayedSample = voice.delayLines[0].processSample(0, midSideData[0][sample]);
+                
+                // Add to wet buffer
+                midSideWetData[0][sample] += delayedSample * voice.mix.load();
+            }
+            
+            // Process side channel (channel 1) if enabled
+            if (sideEnabled) {
+                // Calculate delay time for side channel
+                float modulationRange = sideDepth * MAX_DELAY_MS * 0.001f;
+                float baseDelaySec = baseDelayMs * 0.001f;
+                float modulation = sideLfoValue * modulationRange;
+                
+                // Apply non-linear modulation scaling for smoother pitch variations
+                modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
+                
+                float sideDelay = baseDelaySec + modulation;
+                
+                // Clamp delay time to valid range
+                sideDelay = std::max(0.001f, std::min(sideDelay, 0.1f)); // 1ms to 100ms
+                
+                // Update delay time and process sample
+                voice.delayLines[1].setDelayTime(sideDelay);
+                float delayedSample = voice.delayLines[1].processSample(0, midSideData[1][sample]);
+                
+                // Add to wet buffer with configurable side gain
+                // Convert dB to linear gain: gain = 10^(dB/20)
+                float sideGainLinear = std::pow(10.0f, sideGainDb / 20.0f);
+                midSideWetData[1][sample] += delayedSample * voice.mix.load() * sideGainLinear;
+            }
+        }
+    }
+    
+    // Convert processed M/S back to L/R and add to wet buffer
+    for (int sample = 0; sample < numSamples; ++sample) {
+        // Get the original L/R samples for dry signal calculation
+        float left = buffer.getSample(0, sample);
+        float right = buffer.getSample(1, sample);
+        
+        // Calculate dry M/S signals
+        float dryMid = left + right;
+        float drySide = left - right;
+        
+        // Use processed signal for enabled channels, dry signal for disabled channels
+        float finalMid = midEnabled ? midSideWetData[0][sample] : dryMid;
+        float finalSide = sideEnabled ? midSideWetData[1][sample] : drySide;
+        
+        // M/S decoding: L = (M + S)/2, R = (M - S)/2
+        float wetLeft = (finalMid + finalSide) * 0.5f;
+        float wetRight = (finalMid - finalSide) * 0.5f;
+        
+        wetBuffer.addSample(0, sample, wetLeft);
+        wetBuffer.addSample(1, sample, wetRight);
+    }
+}
+
 void Chorus::clear() {
     if (prepared.load()) {
         for (int i = 0; i < MAX_VOICES; ++i) {
             for (int channel = 0; channel < 2; ++channel) {
                 voices[i].delayLines[channel].clear();
             }
-            voices[i].lfo.reset();
+            // Reset both LFOs
+            voices[i].lfos[0].reset();
+            voices[i].lfos[1].reset();
             voices[i].currentLfoValue = 0.0f;
             voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
         }
@@ -582,6 +992,18 @@ void Chorus::setStereoSpread(float spread) {
     updateStereoConfiguration();
 }
 
+void Chorus::setMidEnabled(bool enabled) {
+    midEnabled = enabled;
+}
+
+void Chorus::setSideEnabled(bool enabled) {
+    sideEnabled = enabled;
+}
+
+void Chorus::setSideGain(float gainDb) {
+    sideGainDb = std::clamp(gainDb, -20.0f, 20.0f);
+}
+
 void Chorus::updateStereoConfiguration() {
     if (currentStereoMode == StereoMode::Stereo) {
         // Use full 360° range for maximum stereo effect
@@ -601,6 +1023,33 @@ void Chorus::updateStereoConfiguration() {
             float voiceSpread = (i * 15.0f) * spreadCurve; // Up to 15° additional spread per voice
             voice.leftPhaseOffset -= voiceSpread;
             voice.rightPhaseOffset += voiceSpread;
+            
+            // Clear mid-side offsets in stereo mode
+            voice.midPhaseOffset = 0.0f;
+            voice.sidePhaseOffset = 0.0f;
+        }
+    } else if (currentStereoMode == StereoMode::MidSide) {
+        // Use full 360° range for maximum mid-side effect
+        // Apply a non-linear curve to the spread parameter to make it more dramatic
+        float spreadCurve = std::pow(stereoSpread, 0.5f); // Square root curve for more dramatic effect at lower values
+        float maxPhaseOffset = spreadCurve * 360.0f;  // 0° to 360° max
+        
+        for (int i = 0; i < MAX_VOICES; ++i) {
+            Voice& voice = voices[i];
+            
+            // At 0% spread: both mid and side get 0° offset (mono)
+            // At 100% spread: mid = -180°, side = +180° (maximum separation)
+            voice.midPhaseOffset = -maxPhaseOffset * 0.5f;
+            voice.sidePhaseOffset = maxPhaseOffset * 0.5f;
+            
+            // Add slight offset per voice for richer mid-side field
+            float voiceSpread = (i * 15.0f) * spreadCurve; // Up to 15° additional spread per voice
+            voice.midPhaseOffset -= voiceSpread;
+            voice.sidePhaseOffset += voiceSpread;
+            
+            // Clear stereo offsets in mid-side mode
+            voice.leftPhaseOffset = 0.0f;
+            voice.rightPhaseOffset = 0.0f;
         }
     } else {
         // In mono mode, ensure no phase offsets
@@ -608,6 +1057,8 @@ void Chorus::updateStereoConfiguration() {
             Voice& voice = voices[i];
             voice.leftPhaseOffset = 0.0f;
             voice.rightPhaseOffset = 0.0f;
+            voice.midPhaseOffset = 0.0f;
+            voice.sidePhaseOffset = 0.0f;
         }
     }
 }

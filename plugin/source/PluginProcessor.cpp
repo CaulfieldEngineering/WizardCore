@@ -65,7 +65,7 @@ namespace audio_plugin {
             std::make_unique<juce::AudioParameterChoice>(
                 "chorus_stereo_mode",       // parameterID
                 "Stereo Mode",              // parameter name
-                juce::StringArray{"Mono", "Stereo"}, // choices
+                juce::StringArray{"Mono", "Stereo", "MidSide"}, // choices
                 0                           // default value (Mono)
             ),
             
@@ -74,6 +74,28 @@ namespace audio_plugin {
                 "Stereo Spread",            // parameter name
                 juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
                 0.5f                        // default value
+            ),
+            
+            // Mid-Side Chorus parameters
+            std::make_unique<juce::AudioParameterBool>(
+                "chorus_mid_enabled",       // parameterID
+                "Mid Enabled",              // parameter name
+                true                        // default value
+            ),
+            
+            std::make_unique<juce::AudioParameterBool>(
+                "chorus_side_enabled",      // parameterID
+                "Side Enabled",             // parameter name
+                true                        // default value
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "chorus_side_gain",         // parameterID
+                "Side Gain",                // parameter name
+                juce::NormalisableRange<float>(-20.0f, 20.0f, 0.1f),
+                0.0f,                      // default value
+                juce::AudioParameterFloatAttributes()
+                    .withLabel("dB")
             )
         })
     {
@@ -89,6 +111,11 @@ namespace audio_plugin {
         chorusStereoModeParam = parameters.getRawParameterValue("chorus_stereo_mode");
         chorusStereoSpreadParam = parameters.getRawParameterValue("chorus_stereo_spread");
         
+        // Initialize mid-side parameter pointers
+        chorusMidEnabledParam = parameters.getRawParameterValue("chorus_mid_enabled");
+        chorusSideEnabledParam = parameters.getRawParameterValue("chorus_side_enabled");
+        chorusSideGainParam = parameters.getRawParameterValue("chorus_side_gain");
+        
         // Verify global parameter initialization
         if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam) {
             DBG("PluginProcessor: Warning - Some global chorus parameters failed to initialize");
@@ -97,6 +124,11 @@ namespace audio_plugin {
         // Verify stereo parameter initialization
         if (!chorusStereoModeParam || !chorusStereoSpreadParam) {
             DBG("PluginProcessor: Warning - Some stereo chorus parameters failed to initialize");
+        }
+        
+        // Verify mid-side parameter initialization
+        if (!chorusMidEnabledParam || !chorusSideEnabledParam || !chorusSideGainParam) {
+            DBG("PluginProcessor: Warning - Some mid-side chorus parameters failed to initialize");
         }
         
         DBG("PluginProcessor: Multi-voice Chorus parameters initialized");
@@ -234,14 +266,33 @@ namespace audio_plugin {
         // Update stereo Chorus parameters
         if (chorusStereoModeParam) {
             int stereoModeIndex = static_cast<int>(chorusStereoModeParam->load());
-            audio_plugin::Chorus::StereoMode stereoMode = (stereoModeIndex == 0) ? 
-                audio_plugin::Chorus::StereoMode::Mono : 
-                audio_plugin::Chorus::StereoMode::Stereo;
+            audio_plugin::Chorus::StereoMode stereoMode;
+            switch (stereoModeIndex) {
+                case 0: stereoMode = audio_plugin::Chorus::StereoMode::Mono; break;
+                case 1: stereoMode = audio_plugin::Chorus::StereoMode::Stereo; break;
+                case 2: stereoMode = audio_plugin::Chorus::StereoMode::MidSide; break;
+                default: stereoMode = audio_plugin::Chorus::StereoMode::Mono; break;
+            }
             chorus.setStereoMode(stereoMode);
         }
         
         if (chorusStereoSpreadParam) {
             chorus.setStereoSpread(chorusStereoSpreadParam->load());
+        }
+        
+        // Update mid-side Chorus parameters
+        if (chorusMidEnabledParam) {
+            bool midEnabled = chorusMidEnabledParam->load() > 0.5f;
+            chorus.setMidEnabled(midEnabled);
+        }
+        
+        if (chorusSideEnabledParam) {
+            bool sideEnabled = chorusSideEnabledParam->load() > 0.5f;
+            chorus.setSideEnabled(sideEnabled);
+        }
+        
+        if (chorusSideGainParam) {
+            chorus.setSideGain(chorusSideGainParam->load());
         }
 
 		chorus.getVoiceLFO(0)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);

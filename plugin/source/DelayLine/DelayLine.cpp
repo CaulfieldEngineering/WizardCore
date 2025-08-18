@@ -208,32 +208,7 @@ void DelayLine::processBlock(juce::AudioBuffer<float>& buffer)
     }
 }
 
-void DelayLine::processBlock(juce::AudioBuffer<float>& buffer, float dryWetMix)
-{
-    jassert(isPrepared());
-    jassert(dryWetMix >= 0.0f && dryWetMix <= 1.0f);
-    
-    const int numSamples = buffer.getNumSamples();
-    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
-    
-    const float wetGain = dryWetMix;
-    const float dryGain = 1.0f - dryWetMix;
-    
-    // Process with dry/wet mix
-    // Note: For modulation effects, setDelayTime() can be called before or during
-    // this process, and linear interpolation ensures smooth transitions
-    for (int ch = 0; ch < channelsToProcess; ++ch)
-    {
-        float* channelData = buffer.getWritePointer(ch);
-        
-        for (int i = 0; i < numSamples; ++i)
-        {
-            float dry = channelData[i];
-            float wet = processSample(ch, dry);
-            channelData[i] = dry * dryGain + wet * wetGain;
-        }
-    }
-}
+
 
 void DelayLine::clear()
 {

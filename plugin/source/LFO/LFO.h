@@ -48,6 +48,14 @@ public:
     };
 
     /**
+     * @brief Coupling types for LFO output
+     */
+    enum class CouplingType {
+        DC = 0,        ///< DC coupling: output range [0, 1]
+        AC = 1         ///< AC coupling: output range [-1, 1]
+    };
+
+    /**
      * @brief Default constructor
      */
     LFO();
@@ -104,6 +112,17 @@ public:
     void setInvert(bool shouldInvert);
 
     /**
+     * @brief Enable or disable the LFO
+     * @param shouldEnable True to enable LFO processing, false to disable
+     * 
+     * When disabled, the LFO will output 0.0 regardless of other parameters.
+     * This provides a convenient way to bypass the LFO without changing
+     * other parameter settings.
+     * Safe to call from any thread.
+     */
+    void setEnabled(bool shouldEnable);
+
+    /**
      * @brief Set waveform symmetry
      * @param symmetryPercent Symmetry percentage (10.0 to 90.0)
      * 
@@ -145,6 +164,25 @@ public:
     void setSyncRate(int syncRateIndex);
 
     /**
+     * @brief Set the coupling type for LFO output
+     * @param coupling The coupling type (DC or AC)
+     * 
+     * DC coupling: output range [0, 1] (default)
+     * AC coupling: output range [-1, 1] (bipolar)
+     * Should only be called once during initialization, not during audio processing.
+     * Safe to call from any thread.
+     */
+    void setCoupling(CouplingType coupling);
+
+    /**
+     * @brief Get the current coupling type
+     * @return Current coupling type (DC or AC)
+     * 
+     * Safe to call from any thread.
+     */
+    CouplingType getCoupling() const;
+
+    /**
      * @brief Update host tempo information
      * @param bpm Host BPM (beats per minute)
      * @param isPlaying Whether host transport is playing
@@ -182,6 +220,7 @@ public:
      * This method efficiently updates all parameters and only regenerates
      * the wavetable when necessary. Call this from processBlock instead
      * of individual setter methods for optimal performance.
+     * Note: Coupling type is not included as it should be set once during initialization.
      * Thread-safe for audio processing.
      */
     void updateParameters(float frequency, float depth, bool enabled,
@@ -285,6 +324,7 @@ private:
     std::atomic<bool> prepared{false};
     std::atomic<bool> invert{false}; // Added for waveform inversion
     std::atomic<WaveformType> waveShape{WaveformType::Sine}; // Current waveshape
+    std::atomic<CouplingType> coupling{CouplingType::DC}; // Output coupling type (set once at init)
     
     // Host sync parameters
     std::atomic<bool> syncToHost{false};

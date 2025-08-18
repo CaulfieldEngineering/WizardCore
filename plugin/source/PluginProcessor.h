@@ -76,6 +76,11 @@ private:
 	// Stereo Chorus parameters
 	std::atomic<float>* chorusStereoModeParam = nullptr;
 	std::atomic<float>* chorusStereoSpreadParam = nullptr;
+	
+	// Mid-Side Chorus parameters
+	std::atomic<float>* chorusMidEnabledParam = nullptr;
+	std::atomic<float>* chorusSideEnabledParam = nullptr;
+	std::atomic<float>* chorusSideGainParam = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

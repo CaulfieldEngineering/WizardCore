@@ -87,6 +87,20 @@ public:
     LFO* getVoiceLFO(int voiceIndex);
     
     /**
+     * @brief Get direct access to a voice's left/mid LFO instance
+     * @param voiceIndex Voice index (0-4)
+     * @return Pointer to the left/mid LFO instance, or nullptr if invalid index
+     */
+    LFO* getVoiceLeftLFO(int voiceIndex);
+    
+    /**
+     * @brief Get direct access to a voice's right/side LFO instance
+     * @param voiceIndex Voice index (0-4)
+     * @return Pointer to the right/side LFO instance, or nullptr if invalid index
+     */
+    LFO* getVoiceRightLFO(int voiceIndex);
+    
+    /**
      * @brief Get direct access to a voice's delay line instance
      * @param voiceIndex Voice index (0-4)
      * @return Pointer to the DelayLine instance, or nullptr if invalid index
@@ -128,6 +142,63 @@ public:
      * @param phaseOffset Phase offset in degrees (0-360)
      */
     void setVoicePhaseOffset(int voiceIndex, float phaseOffset);
+
+    // Independent LFO control methods
+    /**
+     * @brief Enable or disable LFO linking for a voice
+     * @param voiceIndex Voice index (0-4)
+     * @param linked When true, both LFOs use global voice parameters; when false, use independent parameters
+     */
+    void setVoiceLFOLinked(int voiceIndex, bool linked);
+    
+    /**
+     * @brief Check if a voice's LFOs are linked
+     * @param voiceIndex Voice index (0-4)
+     * @return True if LFOs are linked (using global voice parameters)
+     */
+    bool isVoiceLFOLinked(int voiceIndex) const;
+    
+    /**
+     * @brief Set independent rate for left/mid LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param rateInHz Modulation rate in Hz for left/mid channel
+     */
+    void setVoiceLeftRate(int voiceIndex, float rateInHz);
+    
+    /**
+     * @brief Set independent rate for right/side LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param rateInHz Modulation rate in Hz for right/side channel
+     */
+    void setVoiceRightRate(int voiceIndex, float rateInHz);
+    
+    /**
+     * @brief Set independent depth for left/mid LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param depth Modulation depth for left/mid channel (0.0 to 1.0)
+     */
+    void setVoiceLeftDepth(int voiceIndex, float depth);
+    
+    /**
+     * @brief Set independent depth for right/side LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param depth Modulation depth for right/side channel (0.0 to 1.0)
+     */
+    void setVoiceRightDepth(int voiceIndex, float depth);
+    
+    /**
+     * @brief Set independent phase offset for left/mid LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param phaseOffset Phase offset in degrees for left/mid channel (0-360)
+     */
+    void setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset);
+    
+    /**
+     * @brief Set independent phase offset for right/side LFO
+     * @param voiceIndex Voice index (0-4)
+     * @param phaseOffset Phase offset in degrees for right/side channel (0-360)
+     */
+    void setVoiceRightPhaseOffset(int voiceIndex, float phaseOffset);
 
     // Global parameter setters (affect all voices)
     /**
@@ -197,10 +268,19 @@ public:
     float getVoicePhaseOffset(int voiceIndex) const;
     DelayLine* getVoiceLeftDelayLine(int voiceIndex);
     DelayLine* getVoiceRightDelayLine(int voiceIndex);
+    
+    // Independent LFO getters
+    float getVoiceLeftRate(int voiceIndex) const;
+    float getVoiceRightRate(int voiceIndex) const;
+    float getVoiceLeftDepth(int voiceIndex) const;
+    float getVoiceRightDepth(int voiceIndex) const;
+    float getVoiceLeftPhaseOffset(int voiceIndex) const;
+    float getVoiceRightPhaseOffset(int voiceIndex) const;
 
     enum class StereoMode {
         Mono,           // Original mono behavior
-        Stereo          // Stereo phase offset mode
+        Stereo,         // Stereo phase offset mode
+        MidSide         // Mid-Side processing mode
     };
     
     // Stereo control methods
@@ -208,6 +288,14 @@ public:
     void setStereoSpread(float spread);  // 0.0 = mono, 1.0 = maximum stereo
     StereoMode getStereoMode() const { return currentStereoMode; }
     float getStereoSpread() const { return stereoSpread; }
+    
+    // Mid-Side control methods
+    void setMidEnabled(bool enabled);
+    void setSideEnabled(bool enabled);
+    void setSideGain(float gainDb);  // -20dB to +20dB
+    bool isMidEnabled() const { return midEnabled; }
+    bool isSideEnabled() const { return sideEnabled; }
+    float getSideGain() const { return sideGainDb; }
 
 private:
     // Internal helper methods
@@ -216,20 +304,37 @@ private:
     
     // Voice structure
     struct Voice {
-        LFO lfo;
-        std::array<DelayLine, 2> delayLines;  // [0] = left, [1] = right
+        // Dual LFO system for independent channel control
+        std::array<LFO, 2> lfos;  // [0] = left/mid, [1] = right/side
+        std::array<DelayLine, 2> delayLines;  // [0] = left/mid, [1] = right/side
+        
         std::atomic<bool> enabled{false};
+        
+        // Global voice parameters (affect both LFOs when linked)
         std::atomic<float> rate{1.0f};
         std::atomic<float> depth{0.5f};
         std::atomic<float> mix{0.7f};
         std::atomic<float> baseDelay{30.0f};
         std::atomic<float> phaseOffset{0.0f};
+        
+        // Independent LFO parameters for advanced control
+        std::atomic<float> leftRate{1.0f};      // Independent rate for left/mid LFO
+        std::atomic<float> rightRate{1.0f};     // Independent rate for right/side LFO
+        std::atomic<float> leftDepth{0.5f};     // Independent depth for left/mid LFO
+        std::atomic<float> rightDepth{0.5f};    // Independent depth for right/side LFO
+        std::atomic<float> leftPhaseOffset{0.0f};   // Independent phase for left/mid LFO
+        std::atomic<float> rightPhaseOffset{0.0f};  // Independent phase for right/side LFO
+        
+        // LFO linking control
+        std::atomic<bool> lfoLinked{true};      // When true, both LFOs use global parameters
+        
+        // Current state variables
         float currentLfoValue{0.0f};
         float currentDelayTime{0.03f};
         
-        // Stereo phase offsets for left and right channels
-        float leftPhaseOffset{0.0f};
-        float rightPhaseOffset{0.0f};
+        // Mid-Side channel offsets (for backward compatibility)
+        float midPhaseOffset{0.0f};
+        float sidePhaseOffset{0.0f};
     };
     
     // Core components - array of voices
@@ -264,9 +369,15 @@ private:
     StereoMode currentStereoMode = StereoMode::Mono;
     float stereoSpread = 0.5f;
     
+    // Mid-Side parameters
+    bool midEnabled = true;
+    bool sideEnabled = true;
+    float sideGainDb = 0.0f;  // Side gain in dB (-20 to +20)
+    
     // Stereo processing methods
     void processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
+    void processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void updateStereoConfiguration();
 };
 

@@ -91,6 +91,12 @@ void LFO::setInvert(bool shouldInvert)
     }
 }
 
+void LFO::setEnabled(bool shouldEnable)
+{
+    // Store enabled flag atomically
+    enabled.store(shouldEnable);
+}
+
 void LFO::setSymmetry(float symmetryPercent)
 {
     // Clamp symmetry to valid range and convert to 0.0-1.0 range
@@ -154,6 +160,18 @@ void LFO::setSyncRate(int syncRateIndex)
     } else {
         // DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << (prepared.load() ? "true" : "false") << ", syncToHost=" << (syncToHost.load() ? "true" : "false") << ")");
     }
+}
+
+void LFO::setCoupling(CouplingType couplingType)
+{
+    // Store coupling type atomically
+    // Note: Should only be called during initialization, not during audio processing
+    coupling.store(couplingType);
+}
+
+LFO::CouplingType LFO::getCoupling() const
+{
+    return coupling.load();
 }
 
 void LFO::updateHostInfo(double bpm, bool isPlaying)
@@ -263,6 +281,13 @@ float LFO::getNextSample()
     //    output = 1.0f - output;
     //}
     
+    // Apply coupling transformation (coupling set once at initialization)
+    if (coupling.load() == CouplingType::AC) {
+        // AC coupling: convert [0,1] to [-1,1]
+        output = (output * 2.0f) - 1.0f;
+    }
+    // DC coupling: keep [0,1] range (no change needed)
+    
     // Apply depth scaling
     output *= currentDepth;
     
@@ -351,6 +376,13 @@ float LFO::getCurrentSample() const
     //if (currentInvert) {
     //    output = 1.0f - output;
     //}
+    
+    // Apply coupling transformation (coupling set once at initialization)
+    if (coupling.load() == CouplingType::AC) {
+        // AC coupling: convert [0,1] to [-1,1]
+        output = (output * 2.0f) - 1.0f;
+    }
+    // DC coupling: keep [0,1] range (no change needed)
     
     // Apply depth scaling
     return output * currentDepth;
@@ -898,6 +930,8 @@ void LFO::updateParameters(float frequency, float depth, bool enabled,
         setWaveShape(waveshape);
         lastWaveshape.store(waveshape);
     }
+    
+    // Note: Coupling parameter removed from updateParameters as it should be set once during initialization
     
     // Mark first run as complete
     if (firstRun.load()) {

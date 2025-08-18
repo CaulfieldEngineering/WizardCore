@@ -145,14 +145,7 @@ public:
      */
     void processBlock(juce::AudioBuffer<float>& buffer);
 
-    /**
-     * @brief Process a block of audio with mix control
-     * @param buffer Audio buffer to process in-place
-     * @param dryWetMix Mix between dry (0.0) and wet (1.0) signal
-     * 
-     * Processes all channels with a dry/wet mix control.
-     */
-    void processBlock(juce::AudioBuffer<float>& buffer, float dryWetMix);
+
 
     /**
      * @brief Clear all delay buffers
