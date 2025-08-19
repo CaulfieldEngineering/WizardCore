@@ -11,8 +11,8 @@ namespace audio_plugin {
  * @brief A multi-voice chorus effect using modulated delay lines
  * 
  * This class provides a chorus effect with up to configurable number of modulated delay lines
- * mixed with the dry signal. Each voice has individual parameters for
- * rate, depth, mix, base delay, and phase offset.
+ * mixed with the dry signal. Each voice has individual LFO objects that control
+ * modulation parameters (rate, depth, phase offset) directly, plus mix and base delay.
  * 
  * Thread Safety: Thread-safe for audio processing
  * Memory: Allocates delay buffers and LFO wavetables during prepare()
@@ -22,11 +22,14 @@ namespace audio_plugin {
  * Chorus chorus(3);  // Create chorus with 3 voices maximum
  * chorus.prepare(48000, 2);  // 48kHz, stereo
  * chorus.setVoiceEnabled(0, true);  // Enable first voice
- * chorus.setVoiceRate(0, 1.0);      // 1 Hz modulation for voice 0
- * chorus.setVoiceDepth(0, 0.5);     // 50% modulation depth for voice 0
+ * 
+ * // LFO parameters are now controlled directly via LFO objects:
+ * chorus.getVoiceLeftLFO(0)->setFrequency(1.0);     // 1 Hz modulation for voice 0
+ * chorus.getVoiceLeftLFO(0)->setDepth(0.5f);        // 50% modulation depth for voice 0
+ * chorus.getVoiceLeftLFO(0)->setPhaseOffset(0.0);   // No phase offset for voice 0
+ * 
  * chorus.setVoiceMix(0, 0.7);       // 70% wet, 30% dry for voice 0
  * chorus.setVoiceBaseDelay(0, 30.0); // 30ms base delay for voice 0
- * chorus.setVoicePhaseOffset(0, 0.0); // No phase offset for voice 0
  * chorus.processBlock(audioBuffer);
  * @endcode
  */
@@ -36,7 +39,7 @@ public:
      * @brief Constructor with configurable maximum voices
      * @param maxVoices Maximum number of voices (1-16, default 5)
      */
-    explicit Chorus(int maxVoices = 5);
+    explicit Chorus(int maxVoices = 10);
     
     /**
      * @brief Destructor
@@ -115,19 +118,8 @@ public:
     DelayLine* getVoiceDelayLine(int voiceIndex);
 
     // Per-voice parameter setters
-    /**
-     * @brief Set the LFO modulation rate for a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param rateInHz Modulation rate in Hz (0.1 to 2.0 Hz typical for chorus)
-     */
-    void setVoiceRate(int voiceIndex, float rateInHz);
-
-    /**
-     * @brief Set the modulation depth for a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param depth Modulation depth (0.0 to 1.0)
-     */
-    void setVoiceDepth(int voiceIndex, float depth);
+    // Note: LFO parameters (rate, depth, phase) are now controlled directly via LFO objects
+    // Use: chorus.getVoiceLeftLFO(index)->setFrequency(), setDepth(), setPhaseOffset(), etc.
 
     /**
      * @brief Set the dry/wet mix for a specific voice
@@ -143,82 +135,17 @@ public:
      */
     void setVoiceBaseDelay(int voiceIndex, float delayMs);
 
-    /**
-     * @brief Set the phase offset for a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param phaseOffset Phase offset in degrees (0-360)
-     */
-    void setVoicePhaseOffset(int voiceIndex, float phaseOffset);
+    // Note: Phase offset now controlled directly via LFO object
+    // Use: chorus.getVoiceLeftLFO(index)->setPhaseOffset(radians)
 
-    // Independent LFO control methods
-    /**
-     * @brief Enable or disable LFO linking for a voice
-     * @param voiceIndex Voice index (0-4)
-     * @param linked When true, both LFOs use global voice parameters; when false, use independent parameters
-     */
-    void setVoiceLFOLinked(int voiceIndex, bool linked);
-    
-    /**
-     * @brief Check if a voice's LFOs are linked
-     * @param voiceIndex Voice index (0-4)
-     * @return True if LFOs are linked (using global voice parameters)
-     */
-    bool isVoiceLFOLinked(int voiceIndex) const;
-    
-    /**
-     * @brief Set independent rate for left/mid LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param rateInHz Modulation rate in Hz for left/mid channel
-     */
-    void setVoiceLeftRate(int voiceIndex, float rateInHz);
-    
-    /**
-     * @brief Set independent rate for right/side LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param rateInHz Modulation rate in Hz for right/side channel
-     */
-    void setVoiceRightRate(int voiceIndex, float rateInHz);
-    
-    /**
-     * @brief Set independent depth for left/mid LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param depth Modulation depth for left/mid channel (0.0 to 1.0)
-     */
-    void setVoiceLeftDepth(int voiceIndex, float depth);
-    
-    /**
-     * @brief Set independent depth for right/side LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param depth Modulation depth for right/side channel (0.0 to 1.0)
-     */
-    void setVoiceRightDepth(int voiceIndex, float depth);
-    
-    /**
-     * @brief Set independent phase offset for left/mid LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param phaseOffset Phase offset in degrees for left/mid channel (0-360)
-     */
-    void setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset);
-    
-    /**
-     * @brief Set independent phase offset for right/side LFO
-     * @param voiceIndex Voice index (0-4)
-     * @param phaseOffset Phase offset in degrees for right/side channel (0-360)
-     */
-    void setVoiceRightPhaseOffset(int voiceIndex, float phaseOffset);
+    // Independent LFO control methods removed - LFOs are now always independent
+    // Access LFO parameters directly via:
+    // - getVoiceLeftLFO(index)->setFrequency(), setDepth(), setPhaseOffset()
+    // - getVoiceRightLFO(index)->setFrequency(), setDepth(), setPhaseOffset()
 
     // Global parameter setters (affect all voices)
-    /**
-     * @brief Set the LFO modulation rate for all voices
-     * @param rateInHz Modulation rate in Hz (0.1 to 2.0 Hz typical for chorus)
-     */
-    void setRate(float rateInHz);
-
-    /**
-     * @brief Set the modulation depth for all voices
-     * @param depth Modulation depth (0.0 to 1.0)
-     */
-    void setDepth(float depth);
+    // Note: LFO parameters (rate, depth) are now controlled directly via individual LFO objects
+    // To set all voices: for(int i=0; i<maxVoices; ++i) getVoiceLeftLFO(i)->setFrequency(rate);
 
     /**
      * @brief Set the dry/wet mix for all voices
@@ -261,11 +188,12 @@ public:
     bool isPrepared() const;
 
     // Getters (all thread-safe)
-    float getRate() const { return rate.load(); }
-    float getDepth() const { return depth.load(); }
+    // Note: getRate() and getDepth() removed - access via individual LFO objects
+    // Use: getVoiceLeftLFO(index)->getFrequency() and getVoiceLeftLFO(index)->getDepth()
     float getMix() const { return mix.load(); }
     float getBaseDelay() const { return baseDelay.load(); }
     double getSampleRate() const { return sampleRate.load(); }
+    bool isEnabled() const { return enabled.load(); }
     
     // Per-voice getters
     float getVoiceRate(int voiceIndex) const;
@@ -276,13 +204,8 @@ public:
     DelayLine* getVoiceLeftDelayLine(int voiceIndex);
     DelayLine* getVoiceRightDelayLine(int voiceIndex);
     
-    // Independent LFO getters
-    float getVoiceLeftRate(int voiceIndex) const;
-    float getVoiceRightRate(int voiceIndex) const;
-    float getVoiceLeftDepth(int voiceIndex) const;
-    float getVoiceRightDepth(int voiceIndex) const;
-    float getVoiceLeftPhaseOffset(int voiceIndex) const;
-    float getVoiceRightPhaseOffset(int voiceIndex) const;
+    // Independent LFO getters removed - access directly via LFO objects:
+    // getVoiceLeftLFO(index)->getFrequency(), getDepth(), getPhaseOffset(), etc.
 
     enum class StereoMode {
         Mono,           // Original mono behavior
@@ -308,6 +231,7 @@ private:
     // Internal helper methods
     void updateLFO();
     void updateDelayTime();
+    void syncRightLFOsToLeft();
     
     // Voice structure
     struct Voice {
@@ -317,23 +241,12 @@ private:
         
         std::atomic<bool> enabled{false};
         
-        // Global voice parameters (affect both LFOs when linked)
-        std::atomic<float> rate{1.0f};
-        std::atomic<float> depth{0.5f};
+        // Non-LFO voice parameters (chorus-specific, not duplicated in LFO)
         std::atomic<float> mix{0.7f};
         std::atomic<float> baseDelay{30.0f};
-        std::atomic<float> phaseOffset{0.0f};
         
-        // Independent LFO parameters for advanced control
-        std::atomic<float> leftRate{1.0f};      // Independent rate for left/mid LFO
-        std::atomic<float> rightRate{1.0f};     // Independent rate for right/side LFO
-        std::atomic<float> leftDepth{0.5f};     // Independent depth for left/mid LFO
-        std::atomic<float> rightDepth{0.5f};    // Independent depth for right/side LFO
-        std::atomic<float> leftPhaseOffset{0.0f};   // Independent phase for left/mid LFO
-        std::atomic<float> rightPhaseOffset{0.0f};  // Independent phase for right/side LFO
-        
-        // LFO linking control
-        std::atomic<bool> lfoLinked{true};      // When true, both LFOs use global parameters
+        // Note: All LFO parameters (rate, depth, phase) are now stored ONLY in the LFO objects
+        // Access via: lfos[0].getFrequency(), lfos[0].getDepth(), lfos[0].getPhaseOffset(), etc.
         
         // Current state variables
         float currentLfoValue{0.0f};
@@ -349,8 +262,7 @@ private:
     const int maxVoices;  // Maximum number of voices (set at construction)
     
     // Global parameters (thread-safe using atomics)
-    std::atomic<float> rate{1.0f};
-    std::atomic<float> depth{0.5f};
+    // Note: LFO parameters (rate, depth, phase) are stored in individual LFO objects
     std::atomic<float> mix{0.7f};
     std::atomic<float> baseDelay{30.0f};
     std::atomic<double> sampleRate{44100.0};

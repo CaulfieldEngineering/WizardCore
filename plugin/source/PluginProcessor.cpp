@@ -51,7 +51,7 @@ namespace audio_plugin {
             std::make_unique<juce::AudioParameterFloat>(
                 "chorus_voice_count",       // parameterID
                 "Number of Voices",         // parameter name
-                juce::NormalisableRange<float>(1.0f, 10.0f, 1.0f), // 1.0 to 5.0, step 1.0 (max supported by this instance)
+                juce::NormalisableRange<float>(1.0f, MAX_CHORUS_VOICES, 1.0f), // 1.0 to 5.0, step 1.0 (max supported by this instance)
                 1.0f                        // default value
             ),
             
@@ -98,7 +98,7 @@ namespace audio_plugin {
                     .withLabel("dB")
             )
         }),
-        chorus(10)  // Initialize chorus with 5 voices maximum
+        chorus(MAX_CHORUS_VOICES)  // Initialize chorus with MAX_CHORUS_VOICES voices maximum
     {
         // Initialize global parameter pointers for quick access
         chorusRateParam = parameters.getRawParameterValue("chorus_rate");
@@ -205,9 +205,14 @@ namespace audio_plugin {
         // Prepare Chorus - all parameter initialization will happen automatically
         // when updateParameters is called for the first time
         chorus.prepare(sampleRate, getTotalNumInputChannels());
-        chorus.setNumVoices(5);
+        
+        // Prepare test LFO for UI development
+        testLFO.prepare(sampleRate);
+        testLFO.setFrequency(1.0);  // 1 Hz default
+        testLFO.setDepth(0.8f);     // 80% depth
+        testLFO.setEnabled(true);   // Start enabled
 		
-        DBG("Plugin prepared successfully with Multi-Voice Chorus");
+        DBG("Plugin prepared successfully with Multi-Voice Chorus and Test LFO");
     }
 
     void AudioPluginAudioProcessor::releaseResources() {
@@ -257,63 +262,7 @@ namespace audio_plugin {
             DBG("No input channels");
             return;
         }
-        
-        // Update global Chorus parameters
-        if (chorusRateParam) chorus.setRate(chorusRateParam->load());
-        if (chorusDepthParam) chorus.setDepth(chorusDepthParam->load());
-        if (chorusMixParam) chorus.setMix(chorusMixParam->load());
-        if (chorusBaseDelayParam) chorus.setBaseDelay(chorusBaseDelayParam->load());
-        
-        // Update stereo Chorus parameters
-        if (chorusStereoModeParam) {
-            int stereoModeIndex = static_cast<int>(chorusStereoModeParam->load());
-            audio_plugin::Chorus::StereoMode stereoMode;
-            switch (stereoModeIndex) {
-                case 0: stereoMode = audio_plugin::Chorus::StereoMode::Mono; break;
-                case 1: stereoMode = audio_plugin::Chorus::StereoMode::Stereo; break;
-                case 2: stereoMode = audio_plugin::Chorus::StereoMode::MidSide; break;
-                default: stereoMode = audio_plugin::Chorus::StereoMode::Mono; break;
-            }
-            chorus.setStereoMode(stereoMode);
-        }
-        
-        if (chorusStereoSpreadParam) {
-            chorus.setStereoSpread(chorusStereoSpreadParam->load());
-        }
-        
-        // Update mid-side Chorus parameters
-        if (chorusMidEnabledParam) {
-            bool midEnabled = chorusMidEnabledParam->load() > 0.5f;
-            chorus.setMidEnabled(midEnabled);
-        }
-        
-        if (chorusSideEnabledParam) {
-            bool sideEnabled = chorusSideEnabledParam->load() > 0.5f;
-            chorus.setSideEnabled(sideEnabled);
-        }
-        
-        if (chorusSideGainParam) {
-            chorus.setSideGain(chorusSideGainParam->load());
-        }
 
-		chorus.getVoiceLFO(0)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
-		chorus.getVoiceLFO(1)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
-		chorus.getVoiceLFO(2)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
-		chorus.getVoiceLFO(3)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
-		chorus.getVoiceLFO(4)->setWaveShape(audio_plugin::LFO::WaveformType::Triangle);
-
-        // Update voice count (convert float to int)
-        if (chorusVoiceCountParam) {
-            int voiceCount = static_cast<int>(chorusVoiceCountParam->load());
-            chorus.setNumVoices(voiceCount);
-        }
-
-        // Update chorus enabled state (convert float to bool)
-        if (chorusEnabledParam) {
-            bool enabled = chorusEnabledParam->load() > 0.5f;
-            chorus.setEnabled(enabled);
-        }
-        
         // Process audio through the multi-voice chorus effect
         chorus.processBlock(buffer);
     }
@@ -323,8 +272,8 @@ namespace audio_plugin {
     }
 
     juce::AudioProcessorEditor *AudioPluginAudioProcessor::createEditor() {
-        // return new AudioPluginAudioProcessorEditor(*this);
-        return new juce::GenericAudioProcessorEditor(*this);
+        return new AudioPluginAudioProcessorEditor(*this);
+        // return new juce::GenericAudioProcessorEditor(*this);  // Generic UI (commented out)
     }
 
     void AudioPluginAudioProcessor::getStateInformation(juce::MemoryBlock& destData)

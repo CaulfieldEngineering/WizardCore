@@ -5,8 +5,6 @@ namespace audio_plugin {
 
 Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX_VOICES, maxVoicesIn)) {
     // Initialize with default values for global parameters
-    rate = 1.0f;
-    depth = 0.5f;
     mix = 0.5f;
     baseDelay = 30.0f;
     sampleRate = 44100.0;
@@ -18,26 +16,26 @@ Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX
     // Initialize all voices with default values
     for (int i = 0; i < maxVoices; ++i) {
         voices[i].enabled = (i == 0); // Only first voice enabled by default
-        voices[i].rate = 0.8f + (i * 0.15f); // Slightly different rates for each voice (0.8, 0.95, 1.1, 1.25, 1.4)
-        voices[i].depth = 0.5f;
         voices[i].mix = 0.5f - (i * 0.1f); // Decreasing mix for each voice (0.5, 0.4, 0.3, 0.2, 0.1)
         voices[i].baseDelay = 30.0f + (i * 3.0f); // Slightly different delays for each voice (30, 33, 36, 39, 42)
-        voices[i].phaseOffset = maxVoices > 1 ? i * (360.0f / maxVoices) : 0.0f; // Evenly distribute phases
         voices[i].currentLfoValue = 0.0f;
         voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
         
-        // Initialize independent LFO parameters (start linked for backward compatibility)
-        voices[i].lfoLinked = true;
-        voices[i].leftRate = voices[i].rate.load();
-        voices[i].rightRate = voices[i].rate.load();
-        voices[i].leftDepth = voices[i].depth.load();
-        voices[i].rightDepth = voices[i].depth.load();
-        voices[i].leftPhaseOffset = 0.0f;
-        voices[i].rightPhaseOffset = 0.0f;
+        // Initialize LFO objects with default parameters
+        float voiceRate = 0.8f + (i * 0.15f); // Slightly different rates for each voice
+        float voiceDepth = 0.5f;
+        float voicePhase = maxVoices > 1 ? i * (360.0f / maxVoices) : 0.0f; // Evenly distribute phases
         
-        // Initialize mid-side phase offsets for backward compatibility
-        voices[i].midPhaseOffset = 0.0f;
-        voices[i].sidePhaseOffset = 0.0f;
+        // Set LFO parameters directly on LFO objects
+        voices[i].lfos[0].setFrequency(voiceRate);
+        voices[i].lfos[0].setDepth(voiceDepth);
+        voices[i].lfos[0].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+        voices[i].lfos[0].setEnabled(voices[i].enabled.load());
+        
+        voices[i].lfos[1].setFrequency(voiceRate);
+        voices[i].lfos[1].setDepth(voiceDepth);
+        voices[i].lfos[1].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+        voices[i].lfos[1].setEnabled(voices[i].enabled.load());
     }
     
     // Initialize stereo configuration with default values
@@ -68,25 +66,19 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
     for (int i = 0; i < maxVoices; ++i) {
         Voice& voice = voices[i];
         
-        // Prepare both LFOs with baked-in parameters for chorus effect
+        // Prepare both LFOs with default chorus settings
         for (int lfoIndex = 0; lfoIndex < 2; ++lfoIndex) {
             voice.lfos[lfoIndex].prepare(sampleRateIn);
             
             // Set LFO to sine wave with typical chorus settings
             voice.lfos[lfoIndex].setWaveShape(LFO::WaveformType::Sine);
             voice.lfos[lfoIndex].setInvert(false);
-            voice.lfos[lfoIndex].setSymmetry(50.0f);  // 50% = symmetric
+            voice.lfos[lfoIndex].setSymmetry(0.5f);  // 50% = symmetric
             voice.lfos[lfoIndex].setSyncToHost(false);
             voice.lfos[lfoIndex].setCoupling(LFO::CouplingType::AC);  // Use AC coupling for bipolar output [-1,1]
             
-            // Set individual phase offsets - for linked mode, use voice phase offset
-            if (voice.lfoLinked.load()) {
-                voice.lfos[lfoIndex].setPhaseOffset(voice.phaseOffset.load());
-            } else {
-                // Use independent phase offsets
-                float phaseOffset = (lfoIndex == 0) ? voice.leftPhaseOffset.load() : voice.rightPhaseOffset.load();
-                voice.lfos[lfoIndex].setPhaseOffset(phaseOffset);
-            }
+            // LFO parameters are now set directly via the LFO objects
+            // Phase offsets, frequencies, and depths are controlled via UI → LFO objects
         }
         
         // Prepare delay lines with maximum delay time needed
@@ -192,99 +184,14 @@ DelayLine* Chorus::getVoiceRightDelayLine(int voiceIndex) {
     return &voices[voiceIndex].delayLines[1];
 }
 
-// Independent LFO getters
-float Chorus::getVoiceLeftRate(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].leftRate.load();
-}
-
-float Chorus::getVoiceRightRate(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].rightRate.load();
-}
-
-float Chorus::getVoiceLeftDepth(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].leftDepth.load();
-}
-
-float Chorus::getVoiceRightDepth(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].rightDepth.load();
-}
-
-float Chorus::getVoiceLeftPhaseOffset(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].leftPhaseOffset.load();
-}
-
-float Chorus::getVoiceRightPhaseOffset(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return 0.0f;
-    }
-    return voices[voiceIndex].rightPhaseOffset.load();
-}
+// Independent LFO getters removed - access LFO parameters directly via:
+// getVoiceLeftLFO(index)->getFrequency(), getDepth(), getPhaseOffset(), etc.
 
 // Per-voice parameter setters
-void Chorus::setVoiceRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    if (rateInHz < MIN_RATE || rateInHz > MAX_RATE) {
-        DBG("Chorus: Rate out of range: " << rateInHz << " Hz");
-        return;
-    }
-    
-    voices[voiceIndex].rate = rateInHz;
-    
-    // Update LFO frequency if already prepared
-    if (prepared.load()) {
-        if (voices[voiceIndex].lfoLinked.load()) {
-            voices[voiceIndex].lfos[0].setFrequency(static_cast<double>(rateInHz));
-            voices[voiceIndex].lfos[1].setFrequency(static_cast<double>(rateInHz));
-            
-            // Sync independent parameters when linked
-            voices[voiceIndex].leftRate = rateInHz;
-            voices[voiceIndex].rightRate = rateInHz;
-        }
-    }
-    
-    // DBG("Chorus: Voice " << voiceIndex << " rate set to " << rateInHz << " Hz");
-}
+// Note: LFO parameters (rate, depth, phase) are now controlled directly via LFO objects
+// These methods have been removed - use getVoiceLeftLFO(index)->setFrequency(), etc. instead
 
-void Chorus::setVoiceDepth(int voiceIndex, float depthIn) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    if (depthIn < MIN_DEPTH || depthIn > MAX_DEPTH) {
-        DBG("Chorus: Depth out of range: " << depthIn);
-        return;
-    }
-    
-    voices[voiceIndex].depth = depthIn;
-    
-    // Sync independent depth parameters when linked
-    if (voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].leftDepth = depthIn;
-        voices[voiceIndex].rightDepth = depthIn;
-    }
-    
-    // DBG("Chorus: Voice " << voiceIndex << " depth set to " << depthIn);
-}
+// setVoiceDepth removed - use getVoiceLeftLFO(index)->setDepth() instead
 
 void Chorus::setVoiceMix(int voiceIndex, float mixIn) {
     if (voiceIndex < 0 || voiceIndex >= maxVoices) {
@@ -326,180 +233,18 @@ void Chorus::setVoiceBaseDelay(int voiceIndex, float delayMs) {
     // DBG("Chorus: Voice " << voiceIndex << " base delay set to " << delayMs << " ms");
 }
 
-void Chorus::setVoicePhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    // Clamp phase offset to valid range
-    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
-    voices[voiceIndex].phaseOffset = phaseOffset;
-    
-    // Update both LFOs if linked
-    if (voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].lfos[0].setPhaseOffset(phaseOffset);
-        voices[voiceIndex].lfos[1].setPhaseOffset(phaseOffset);
-    }
-}
+// setVoicePhaseOffset removed - use getVoiceLeftLFO(index)->setPhaseOffset() instead
 
-// Independent LFO control methods
-void Chorus::setVoiceLFOLinked(int voiceIndex, bool linked) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    voices[voiceIndex].lfoLinked = linked;
-    
-    if (linked) {
-        // When linking, sync independent parameters to global voice parameters
-        voices[voiceIndex].leftRate = voices[voiceIndex].rate.load();
-        voices[voiceIndex].rightRate = voices[voiceIndex].rate.load();
-        voices[voiceIndex].leftDepth = voices[voiceIndex].depth.load();
-        voices[voiceIndex].rightDepth = voices[voiceIndex].depth.load();
-        voices[voiceIndex].leftPhaseOffset = voices[voiceIndex].phaseOffset.load();
-        voices[voiceIndex].rightPhaseOffset = voices[voiceIndex].phaseOffset.load();
-        
-        // Update LFO parameters
-        voices[voiceIndex].lfos[0].setPhaseOffset(voices[voiceIndex].phaseOffset.load());
-        voices[voiceIndex].lfos[1].setPhaseOffset(voices[voiceIndex].phaseOffset.load());
-    }
-}
+// Independent LFO control methods removed - LFOs are now always independent
+// Access LFO parameters directly via getVoiceLeftLFO(index) and getVoiceRightLFO(index)
 
-bool Chorus::isVoiceLFOLinked(int voiceIndex) const {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        return true; // Default to linked for invalid index
-    }
-    return voices[voiceIndex].lfoLinked.load();
-}
-
-void Chorus::setVoiceLeftRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    rateInHz = juce::jlimit(MIN_RATE, MAX_RATE, rateInHz);
-    voices[voiceIndex].leftRate = rateInHz;
-    
-    if (!voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].lfos[0].setFrequency(rateInHz);
-    }
-}
-
-void Chorus::setVoiceRightRate(int voiceIndex, float rateInHz) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    rateInHz = juce::jlimit(MIN_RATE, MAX_RATE, rateInHz);
-    voices[voiceIndex].rightRate = rateInHz;
-    
-    if (!voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].lfos[1].setFrequency(rateInHz);
-    }
-}
-
-void Chorus::setVoiceLeftDepth(int voiceIndex, float depth) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    depth = juce::jlimit(MIN_DEPTH, MAX_DEPTH, depth);
-    voices[voiceIndex].leftDepth = depth;
-}
-
-void Chorus::setVoiceRightDepth(int voiceIndex, float depth) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    depth = juce::jlimit(MIN_DEPTH, MAX_DEPTH, depth);
-    voices[voiceIndex].rightDepth = depth;
-}
-
-void Chorus::setVoiceLeftPhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
-    voices[voiceIndex].leftPhaseOffset = phaseOffset;
-    
-    if (!voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].lfos[0].setPhaseOffset(phaseOffset);
-    }
-}
-
-void Chorus::setVoiceRightPhaseOffset(int voiceIndex, float phaseOffset) {
-    if (voiceIndex < 0 || voiceIndex >= maxVoices) {
-        DBG("Chorus: Voice index out of range: " << voiceIndex);
-        return;
-    }
-    
-    phaseOffset = juce::jlimit(MIN_PHASE_OFFSET, MAX_PHASE_OFFSET, phaseOffset);
-    voices[voiceIndex].rightPhaseOffset = phaseOffset;
-    
-    if (!voices[voiceIndex].lfoLinked.load()) {
-        voices[voiceIndex].lfos[1].setPhaseOffset(phaseOffset);
-    }
-}
+// All individual LFO parameter setters removed
+// Use direct LFO control: getVoiceLeftLFO(index)->setFrequency(), setDepth(), setPhaseOffset()
 
 // Global parameter setters (affect all voices)
-void Chorus::setRate(float rateInHz) {
-    if (rateInHz < MIN_RATE || rateInHz > MAX_RATE) {
-        DBG("Chorus: Rate out of range: " << rateInHz << " Hz");
-        return;
-    }
-    
-    rate = rateInHz;
-    
-    // Update voices based on current count, not enabled state
-    int currentVoiceCount = numActiveVoices.load();
-    for (int i = 0; i < currentVoiceCount; ++i) {
-        voices[i].rate = rateInHz;
-        
-        // Update both LFOs if linked, otherwise only update linked parameters
-        if (voices[i].lfoLinked.load()) {
-            voices[i].lfos[0].setFrequency(static_cast<double>(rateInHz));
-            voices[i].lfos[1].setFrequency(static_cast<double>(rateInHz));
-            
-            // Sync independent parameters when linked
-            voices[i].leftRate = rateInHz;
-            voices[i].rightRate = rateInHz;
-        }
-    }
-    
-    // DBG("Chorus: Global rate set to " << rateInHz << " Hz");
-}
+// setRate removed - set individual LFO frequencies via getVoiceLeftLFO(i)->setFrequency()
 
-void Chorus::setDepth(float depthIn) {
-    if (depthIn < MIN_DEPTH || depthIn > MAX_DEPTH) {
-        DBG("Chorus: Depth out of range: " << depthIn);
-        return;
-    }
-    
-    depth = depthIn;
-    
-    // Update voices based on current count, not enabled state
-    int currentVoiceCount = numActiveVoices.load();
-    for (int i = 0; i < currentVoiceCount; ++i) {
-        voices[i].depth = depthIn;
-        
-        // Sync independent depth parameters when linked
-        if (voices[i].lfoLinked.load()) {
-            voices[i].leftDepth = depthIn;
-            voices[i].rightDepth = depthIn;
-        }
-    }
-    
-    // DBG("Chorus: Global depth set to " << depthIn);
-}
+// setDepth removed - set individual LFO depths via getVoiceLeftLFO(i)->setDepth()
 
 void Chorus::setMix(float mixIn) {
     if (mixIn < MIN_MIX || mixIn > MAX_MIX) {
@@ -643,23 +388,22 @@ void Chorus::processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuff
         // Process each sample for this voice
         for (int sample = 0; sample < numSamples; ++sample) {
             // Get LFO value for this sample - use left/mid LFO for mono processing
-            float lfoValue;
-            if (voice.lfoLinked.load()) {
-                // Use left LFO with global voice parameters
-                lfoValue = voice.lfos[0].getNextSample();
-            } else {
-                // Use independent left LFO parameters
-                lfoValue = voice.lfos[0].getNextSample();
-            }
+            float lfoValue = voice.lfos[0].getNextSample();
             
-            // Calculate modulated delay time (simplified with AC coupling)
-            float modulationRange;
-            if (voice.lfoLinked.load()) {
-                modulationRange = voice.depth.load() * MAX_DELAY_MS * 0.001f; // Convert to seconds
-            } else {
-                // Use average of left and right depths for mono mode
-                float avgDepth = (voice.leftDepth.load() + voice.rightDepth.load()) * 0.5f;
-                modulationRange = avgDepth * MAX_DELAY_MS * 0.001f;
+            // Calculate modulated delay time using LFO's own depth parameter
+            float lfoDepth = voice.lfos[0].getDepth();  // Get depth directly from LFO
+            float modulationRange = lfoDepth * MAX_DELAY_MS * 0.001f; // Convert to seconds
+            
+            // Debug output every 44100 samples (once per second at 44.1kHz)
+            static int debugCounter = 0;
+            if (++debugCounter >= 44100) {
+				for (int i = 0; i < numActiveVoices; i++)
+				{
+					DBG("DSP: Voice " + juce::String(voiceIndex) + " - LFO Value: " + juce::String(lfoValue) + ", Depth: " + juce::String(lfoDepth) + ", LFO address: " + juce::String::toHexString(reinterpret_cast<juce::uint64>(&voice.lfos[0])));
+					DBG("DSP: Voice " + juce::String(voiceIndex) + " - LFO Frequency: " + juce::String(voice.lfos[0].getFrequency()) + " Hz");
+			    }
+
+                debugCounter = 0;
             }
             
             float modulatedDelay = voice.baseDelay.load() * 0.001f + lfoValue * modulationRange;
@@ -706,32 +450,15 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
             const float* channelData[2] = { buffer.getReadPointer(0), buffer.getReadPointer(1) };
             float* wetData[2] = { wetBuffer.getWritePointer(0), wetBuffer.getWritePointer(1) };
             
-            // Get LFO values for this sample
+            // Get LFO values for this sample - use independent LFOs for each channel
             float lfoValues[2];
             float depths[2];
             
-            if (voice.lfoLinked.load()) {
-                // Use shared LFO with phase offsets for stereo effect
-                float baseLfoValue = voice.lfos[0].getNextSample();
-                
-                for (int channel = 0; channel < 2; ++channel) {
-                    float phaseOffset = (channel == 0) ? voice.leftPhaseOffset : voice.rightPhaseOffset;
-                    lfoValues[channel] = baseLfoValue + (phaseOffset / 360.0f);
-                    
-                    // Wrap to appropriate range (assuming AC coupling gives [-1, 1])
-                    lfoValues[channel] = std::fmod(lfoValues[channel], 2.0f);
-                    if (lfoValues[channel] > 1.0f) lfoValues[channel] -= 2.0f;
-                    if (lfoValues[channel] < -1.0f) lfoValues[channel] += 2.0f;
-                    
-                    depths[channel] = voice.depth.load();
-                }
-            } else {
-                // Use independent LFOs for each channel
-                lfoValues[0] = voice.lfos[0].getNextSample();
-                lfoValues[1] = voice.lfos[1].getNextSample();
-                depths[0] = voice.leftDepth.load();
-                depths[1] = voice.rightDepth.load();
-            }
+            // Use independent LFOs for each channel
+            lfoValues[0] = voice.lfos[0].getNextSample();
+            lfoValues[1] = voice.lfos[1].getNextSample();
+            depths[0] = voice.lfos[0].getDepth();  // Get depth from LFO object
+            depths[1] = voice.lfos[1].getDepth();  // Get depth from LFO object
             
             // Process each channel with independent parameters
             for (int channel = 0; channel < 2; ++channel) {
@@ -817,37 +544,11 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
             float midLfoValue, sideLfoValue;
             float midDepth, sideDepth;
             
-            if (voice.lfoLinked.load()) {
-                // Use single LFO with phase offsets for backward compatibility
-                float baseLfoValue = voice.lfos[0].getNextSample();
-                
-                // Calculate mid channel LFO value
-                float midPhaseOffset = voice.midPhaseOffset;
-                midLfoValue = baseLfoValue + (midPhaseOffset / 360.0f);
-                
-                // Wrap to appropriate range (assuming AC coupling gives [-1, 1])
-                midLfoValue = std::fmod(midLfoValue, 2.0f);
-                if (midLfoValue > 1.0f) midLfoValue -= 2.0f;
-                if (midLfoValue < -1.0f) midLfoValue += 2.0f;
-                
-                // Calculate side channel LFO value
-                float sidePhaseOffset = voice.sidePhaseOffset;
-                sideLfoValue = baseLfoValue + (sidePhaseOffset / 360.0f);
-                
-                // Wrap to appropriate range
-                sideLfoValue = std::fmod(sideLfoValue, 2.0f);
-                if (sideLfoValue > 1.0f) sideLfoValue -= 2.0f;
-                if (sideLfoValue < -1.0f) sideLfoValue += 2.0f;
-                
-                midDepth = voice.depth.load();
-                sideDepth = voice.depth.load();
-            } else {
-                // Use independent LFOs
-                midLfoValue = voice.lfos[0].getNextSample();  // Mid/left LFO
-                sideLfoValue = voice.lfos[1].getNextSample(); // Side/right LFO
-                midDepth = voice.leftDepth.load();
-                sideDepth = voice.rightDepth.load();
-            }
+            // Use independent LFOs for mid and side channels
+            midLfoValue = voice.lfos[0].getNextSample();  // Mid/left LFO
+            sideLfoValue = voice.lfos[1].getNextSample(); // Side/right LFO
+            midDepth = voice.lfos[0].getDepth();          // Get depth from LFO object
+            sideDepth = voice.lfos[1].getDepth();         // Get depth from LFO object
             
             // Process mid channel (channel 0) if enabled
             if (midEnabled) {
@@ -948,14 +649,16 @@ float Chorus::getVoiceRate(int voiceIndex) const {
     if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
-    return voices[voiceIndex].rate.load();
+    // Return frequency from left LFO
+    return static_cast<float>(voices[voiceIndex].lfos[0].getFrequency());
 }
 
 float Chorus::getVoiceDepth(int voiceIndex) const {
     if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
-    return voices[voiceIndex].depth.load();
+    // Return depth from left LFO
+    return voices[voiceIndex].lfos[0].getDepth();
 }
 
 float Chorus::getVoiceMix(int voiceIndex) const {
@@ -976,7 +679,8 @@ float Chorus::getVoicePhaseOffset(int voiceIndex) const {
     if (voiceIndex < 0 || voiceIndex >= maxVoices) {
         return 0.0f;
     }
-    return voices[voiceIndex].phaseOffset.load();
+    // Return phase offset from left LFO (convert from radians to degrees)
+    return static_cast<float>(voices[voiceIndex].lfos[0].getPhaseOffset() * 180.0 / juce::MathConstants<double>::pi);
 }
 
 void Chorus::updateLFO() {
@@ -992,6 +696,11 @@ void Chorus::updateDelayTime() {
 void Chorus::setStereoMode(StereoMode mode) {
     currentStereoMode = mode;
     updateStereoConfiguration();
+    
+    // In mono mode, sync right LFOs to left LFOs
+    if (mode == StereoMode::Mono) {
+        syncRightLFOsToLeft();
+    }
 }
 
 void Chorus::setStereoSpread(float spread) {
@@ -1011,6 +720,27 @@ void Chorus::setSideGain(float gainDb) {
     sideGainDb = std::clamp(gainDb, -20.0f, 20.0f);
 }
 
+void Chorus::syncRightLFOsToLeft() {
+    // Copy all left LFO parameters to right LFOs for mono mode
+    for (int i = 0; i < maxVoices; ++i) {
+        Voice& voice = voices[i];
+        
+        // Copy all parameters from left LFO (index 0) to right LFO (index 1)
+        voice.lfos[1].setFrequency(voice.lfos[0].getFrequency());
+        voice.lfos[1].setDepth(voice.lfos[0].getDepth());
+        voice.lfos[1].setPhaseOffset(voice.lfos[0].getPhaseOffset());
+        voice.lfos[1].setSymmetry(voice.lfos[0].getSymmetry());
+        voice.lfos[1].setWaveShape(voice.lfos[0].getWaveformType());
+        voice.lfos[1].setInvert(voice.lfos[0].getInvert());
+        voice.lfos[1].setSyncToHost(voice.lfos[0].getSyncToHost());
+        voice.lfos[1].setSyncRate(voice.lfos[0].getSyncRate());
+        voice.lfos[1].setEnabled(voice.lfos[0].isEnabled());
+        
+        // Reset the right LFO position to match left LFO
+        voice.lfos[1].reset(voice.lfos[0].getPosition());
+    }
+}
+
 void Chorus::updateStereoConfiguration() {
     if (currentStereoMode == StereoMode::Stereo) {
         // Use full 360° range for maximum stereo effect
@@ -1023,17 +753,17 @@ void Chorus::updateStereoConfiguration() {
             
             // At 0% spread: both channels get 0° offset (mono)
             // At 100% spread: left = -180°, right = +180° (maximum separation)
-            voice.leftPhaseOffset = -maxPhaseOffset * 0.5f;
-            voice.rightPhaseOffset = maxPhaseOffset * 0.5f;
+            float leftPhaseOffset = -maxPhaseOffset * 0.5f;
+            float rightPhaseOffset = maxPhaseOffset * 0.5f;
             
             // Add slight offset per voice for richer stereo field
             float voiceSpread = (i * 15.0f) * spreadCurve; // Up to 15° additional spread per voice
-            voice.leftPhaseOffset -= voiceSpread;
-            voice.rightPhaseOffset += voiceSpread;
+            leftPhaseOffset -= voiceSpread;
+            rightPhaseOffset += voiceSpread;
             
-            // Clear mid-side offsets in stereo mode
-            voice.midPhaseOffset = 0.0f;
-            voice.sidePhaseOffset = 0.0f;
+            // Set phase offsets directly on LFO objects (convert degrees to radians)
+            voice.lfos[0].setPhaseOffset(leftPhaseOffset * juce::MathConstants<double>::pi / 180.0);
+            voice.lfos[1].setPhaseOffset(rightPhaseOffset * juce::MathConstants<double>::pi / 180.0);
         }
     } else if (currentStereoMode == StereoMode::MidSide) {
         // Use full 360° range for maximum mid-side effect
@@ -1046,26 +776,25 @@ void Chorus::updateStereoConfiguration() {
             
             // At 0% spread: both mid and side get 0° offset (mono)
             // At 100% spread: mid = -180°, side = +180° (maximum separation)
-            voice.midPhaseOffset = -maxPhaseOffset * 0.5f;
-            voice.sidePhaseOffset = maxPhaseOffset * 0.5f;
+            float midPhaseOffset = -maxPhaseOffset * 0.5f;
+            float sidePhaseOffset = maxPhaseOffset * 0.5f;
             
             // Add slight offset per voice for richer mid-side field
             float voiceSpread = (i * 15.0f) * spreadCurve; // Up to 15° additional spread per voice
-            voice.midPhaseOffset -= voiceSpread;
-            voice.sidePhaseOffset += voiceSpread;
+            midPhaseOffset -= voiceSpread;
+            sidePhaseOffset += voiceSpread;
             
-            // Clear stereo offsets in mid-side mode
-            voice.leftPhaseOffset = 0.0f;
-            voice.rightPhaseOffset = 0.0f;
+            // Set phase offsets directly on LFO objects (convert degrees to radians)
+            voice.lfos[0].setPhaseOffset(midPhaseOffset * juce::MathConstants<double>::pi / 180.0);
+            voice.lfos[1].setPhaseOffset(sidePhaseOffset * juce::MathConstants<double>::pi / 180.0);
         }
     } else {
         // In mono mode, ensure no phase offsets
         for (int i = 0; i < maxVoices; ++i) {
             Voice& voice = voices[i];
-            voice.leftPhaseOffset = 0.0f;
-            voice.rightPhaseOffset = 0.0f;
-            voice.midPhaseOffset = 0.0f;
-            voice.sidePhaseOffset = 0.0f;
+            // Set zero phase offset on both LFO objects
+            voice.lfos[0].setPhaseOffset(0.0);
+            voice.lfos[1].setPhaseOffset(0.0);
         }
     }
 }

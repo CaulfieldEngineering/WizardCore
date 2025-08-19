@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 //#include "DelayLine/DelayLine.h"
 #include "Chorus/Chorus.h"
+#include "LFO/LFO.h"
 
 namespace audio_plugin {
 
@@ -10,6 +11,8 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor
 {
 public:
     //==============================================================================
+    static constexpr int MAX_CHORUS_VOICES = 5;  // Maximum number of chorus voices
+    
     AudioPluginAudioProcessor();
     ~AudioPluginAudioProcessor() override;
 
@@ -47,6 +50,10 @@ public:
     //==============================================================================
     // Public access to parameters for the editor
     juce::AudioProcessorValueTreeState parameters;
+    
+    // Public access to DSP objects for the editor (for debug UI)
+    Chorus& getChorus() { return chorus; }
+    LFO& getTestLFO() { return testLFO; }
 
 private:
     //==============================================================================
@@ -63,7 +70,10 @@ private:
 		//juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedMix;
 
 	// Chorus ============================================================
-	Chorus chorus;  // Initialized with 5 voices in constructor
+	Chorus chorus;  // Initialized with MAX_CHORUS_VOICES voices in constructor
+	
+	// Test LFO for UI development
+	LFO testLFO;  // Standalone LFO for testing the UI
 	
 	// Global Chorus parameter pointers for quick access
 	std::atomic<float>* chorusRateParam = nullptr;
