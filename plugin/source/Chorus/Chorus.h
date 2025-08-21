@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include "../LFO/LFO.h"
 #include "../DelayLine/DelayLine.h"
 #include <array>
@@ -227,10 +228,31 @@ public:
     bool isSideEnabled() const { return sideEnabled; }
     float getSideGain() const { return sideGainDb; }
 
+    // Filter control methods
+    void setLPFEnabled(bool enabled);
+    void setHPFEnabled(bool enabled);
+    void setLPFCutoff(float frequencyHz);
+    void setHPFCutoff(float frequencyHz);
+    bool isLPFEnabled() const { return lpfEnabled; }
+    bool isHPFEnabled() const { return hpfEnabled; }
+    float getLPFCutoff() const { return lpfCutoff; }
+    float getHPFCutoff() const { return hpfCutoff; }
+
+    // Individual parameter setters
+    void setRate(float rate);
+    void setDepth(float depth);
+    void setVoiceCount(int voiceCount);
+    void setStereoMode(int stereoMode);
+    
+    // Bulk parameter update method for efficient parameter changes
+    void updateParameters(float rate, float depth, float mix, float baseDelay, int voiceCount,
+                         int stereoMode, float stereoSpread,
+                         bool midEnabled, bool sideEnabled, float sideGain,
+                         bool lpfEnabled = false, float lpfCutoff = 20000.0f,
+                         bool hpfEnabled = false, float hpfCutoff = 20.0f);
+
 private:
     // Internal helper methods
-    void updateLFO();
-    void updateDelayTime();
     void syncRightLFOsToLeft();
     
     // Voice structure
@@ -296,11 +318,34 @@ private:
     bool sideEnabled = true;
     float sideGainDb = 0.0f;  // Side gain in dB (-20 to +20)
     
+    // Filter parameters
+    bool lpfEnabled = false;
+    bool hpfEnabled = false;
+    float lpfCutoff = 20000.0f;  // Hz
+    float hpfCutoff = 20.0f;     // Hz
+    
+    // JUCE filters for wet signal processing
+    std::array<juce::IIRFilter, 2> lpfFilters;  // Left/Right or Mid/Side
+    std::array<juce::IIRFilter, 2> hpfFilters;  // Left/Right or Mid/Side
+    
     // Stereo processing methods
     void processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void updateStereoConfiguration();
+    void configureMonoPhaseOffsets();
+    void configureStereoPhaseOffsets();
+    void configureMidSidePhaseOffsets();
+    
+    // Filter processing method
+    void processFilters(juce::AudioBuffer<float>& wetBuffer);
+    
+    // Internal filter coefficient update methods
+    void updateLPFCoefficients(int channel);
+    void updateHPFCoefficients(int channel);
+    
+    // Voice configuration helper methods
+    float calculateVoiceMixRatio(int voiceIndex) const;
 };
 
 } // namespace audio_plugin

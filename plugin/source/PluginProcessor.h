@@ -91,6 +91,14 @@ private:
 	std::atomic<float>* chorusMidEnabledParam = nullptr;
 	std::atomic<float>* chorusSideEnabledParam = nullptr;
 	std::atomic<float>* chorusSideGainParam = nullptr;
+	
+	// LPF parameters
+	std::atomic<float>* chorusLPFEnabledParam = nullptr;
+	std::atomic<float>* chorusLPFCutoffParam = nullptr;
+	
+	// HPF parameters
+	std::atomic<float>* chorusHPFEnabledParam = nullptr;
+	std::atomic<float>* chorusHPFCutoffParam = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

@@ -1,5 +1,5 @@
 #include "PluginProcessor.h"
-#include "PluginEditor.h"
+#include "Chorus/Chorus.h"
 
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
@@ -96,6 +96,38 @@ namespace audio_plugin {
                 0.0f,                      // default value
                 juce::AudioParameterFloatAttributes()
                     .withLabel("dB")
+            ),
+            
+            // LPF parameters
+            std::make_unique<juce::AudioParameterBool>(
+                "chorus_lpf_enabled",      // parameterID
+                "LPF Enabled",             // parameter name
+                false                      // default value (disabled)
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "chorus_lpf_cutoff",       // parameterID
+                "LPF Cutoff",              // parameter name
+                juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f), // range with skew
+                20000.0f,                  // default value
+                juce::AudioParameterFloatAttributes()
+                    .withLabel("Hz")
+            ),
+            
+            // HPF parameters
+            std::make_unique<juce::AudioParameterBool>(
+                "chorus_hpf_enabled",      // parameterID
+                "HPF Enabled",             // parameter name
+                false                      // default value (disabled)
+            ),
+            
+            std::make_unique<juce::AudioParameterFloat>(
+                "chorus_hpf_cutoff",       // parameterID
+                "HPF Cutoff",              // parameter name
+                juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.3f), // range with skew
+                20.0f,                     // default value
+                juce::AudioParameterFloatAttributes()
+                    .withLabel("Hz")
             )
         }),
         chorus(MAX_CHORUS_VOICES)  // Initialize chorus with MAX_CHORUS_VOICES voices maximum
@@ -117,6 +149,14 @@ namespace audio_plugin {
         chorusSideEnabledParam = parameters.getRawParameterValue("chorus_side_enabled");
         chorusSideGainParam = parameters.getRawParameterValue("chorus_side_gain");
         
+        // Initialize LPF parameter pointers
+        chorusLPFEnabledParam = parameters.getRawParameterValue("chorus_lpf_enabled");
+        chorusLPFCutoffParam = parameters.getRawParameterValue("chorus_lpf_cutoff");
+        
+        // Initialize HPF parameter pointers
+        chorusHPFEnabledParam = parameters.getRawParameterValue("chorus_hpf_enabled");
+        chorusHPFCutoffParam = parameters.getRawParameterValue("chorus_hpf_cutoff");
+        
         // Verify global parameter initialization
         if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam) {
             DBG("PluginProcessor: Warning - Some global chorus parameters failed to initialize");
@@ -130,6 +170,11 @@ namespace audio_plugin {
         // Verify mid-side parameter initialization
         if (!chorusMidEnabledParam || !chorusSideEnabledParam || !chorusSideGainParam) {
             DBG("PluginProcessor: Warning - Some mid-side chorus parameters failed to initialize");
+        }
+        
+        // Verify filter parameter initialization
+        if (!chorusLPFEnabledParam || !chorusLPFCutoffParam || !chorusHPFEnabledParam || !chorusHPFCutoffParam) {
+            DBG("PluginProcessor: Warning - Some filter parameters failed to initialize");
         }
         
         DBG("PluginProcessor: Multi-voice Chorus parameters initialized");
@@ -206,11 +251,10 @@ namespace audio_plugin {
         // when updateParameters is called for the first time
         chorus.prepare(sampleRate, getTotalNumInputChannels());
         
-        // Prepare test LFO for UI development
-        testLFO.prepare(sampleRate);
-        testLFO.setFrequency(1.0);  // 1 Hz default
-        testLFO.setDepth(0.8f);     // 80% depth
-        testLFO.setEnabled(true);   // Start enabled
+        // Initialize chorus with default parameters
+        chorus.setNumVoices(1);  // Start with 1 voice
+        chorus.setMix(0.5f);     // 50% wet/dry mix
+        chorus.setBaseDelay(30.0f); // 30ms base delay
 		
         DBG("Plugin prepared successfully with Multi-Voice Chorus and Test LFO");
     }
@@ -263,8 +307,46 @@ namespace audio_plugin {
             return;
         }
 
-        // Process audio through the multi-voice chorus effect
-        chorus.processBlock(buffer);
+        // Update chorus parameters from the AudioProcessorValueTreeState
+        if (chorusEnabledParam && *chorusEnabledParam > 0.5f) {
+            // Only process if chorus is enabled
+            
+            // Get all current parameter values
+            float rate = chorusRateParam ? static_cast<float>(*chorusRateParam) : 0.8f;
+            float depth = chorusDepthParam ? static_cast<float>(*chorusDepthParam) : 0.5f;
+            float mix = chorusMixParam ? static_cast<float>(*chorusMixParam) : 0.5f;
+            float baseDelay = chorusBaseDelayParam ? static_cast<float>(*chorusBaseDelayParam) : 30.0f;
+            int voiceCount = chorusVoiceCountParam ? static_cast<int>(*chorusVoiceCountParam) : 1;
+            
+            // Convert stereo mode choice to integer (0=Mono, 1=Stereo, 2=MidSide)
+            int stereoMode = 0; // Default to Mono
+            if (chorusStereoModeParam) {
+                stereoMode = static_cast<int>(*chorusStereoModeParam);
+            }
+            
+            float stereoSpread = chorusStereoSpreadParam ? static_cast<float>(*chorusStereoSpreadParam) : 0.5f;
+            bool midEnabled = chorusMidEnabledParam ? (static_cast<float>(*chorusMidEnabledParam) > 0.5f) : true;
+            bool sideEnabled = chorusSideEnabledParam ? (static_cast<float>(*chorusSideEnabledParam) > 0.5f) : true;
+            float sideGain = chorusSideGainParam ? static_cast<float>(*chorusSideGainParam) : 0.0f;
+            
+            // Get filter parameter values
+            bool lpfEnabled = chorusLPFEnabledParam ? (static_cast<float>(*chorusLPFEnabledParam) > 0.5f) : false;
+            float lpfCutoff = chorusLPFCutoffParam ? static_cast<float>(*chorusLPFCutoffParam) : 20000.0f;
+            bool hpfEnabled = chorusHPFEnabledParam ? (static_cast<float>(*chorusHPFEnabledParam) > 0.5f) : false;
+            float hpfCutoff = chorusHPFCutoffParam ? static_cast<float>(*chorusHPFCutoffParam) : 20.0f;
+            
+            // Update all chorus parameters in one call
+            chorus.updateParameters(rate, depth, mix, baseDelay, voiceCount,
+                                  stereoMode, stereoSpread,
+                                  midEnabled, sideEnabled, sideGain,
+                                  lpfEnabled, lpfCutoff, hpfEnabled, hpfCutoff);
+            
+            // Process audio through the multi-voice chorus effect
+            chorus.processBlock(buffer);
+        } else {
+            // If chorus is disabled, just pass through the input
+            // (or apply dry/wet mix if needed)
+        }
     }
 
     bool AudioPluginAudioProcessor::hasEditor() const {
@@ -272,8 +354,7 @@ namespace audio_plugin {
     }
 
     juce::AudioProcessorEditor *AudioPluginAudioProcessor::createEditor() {
-        return new AudioPluginAudioProcessorEditor(*this);
-        // return new juce::GenericAudioProcessorEditor(*this);  // Generic UI (commented out)
+        return new juce::GenericAudioProcessorEditor(*this);
     }
 
     void AudioPluginAudioProcessor::getStateInformation(juce::MemoryBlock& destData)

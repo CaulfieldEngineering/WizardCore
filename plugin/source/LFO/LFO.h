@@ -301,7 +301,9 @@ public:
     void setPosition(float position);
     int getWaveTableSize() const;
 
+
 private:
+
     // Internal helper methods
     void initializeWaveTable();
     void updateIncrement();
@@ -339,7 +341,7 @@ private:
     std::atomic<bool> downbeatDetected{false};
     
     // Smoothed parameters to prevent clicks
-    juce::SmoothedValue<float> smoothedDepth{1.0f};
+    juce::SmoothedValue<float> smoothedDepth{0.0f};  // Start with 0 depth, let setDepth() set the actual value
     juce::SmoothedValue<float> smoothedSymmetry{0.5f};
     
     // Parameter change detection (for efficient updates)

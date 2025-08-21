@@ -31,10 +31,10 @@ void LFO::prepare(double newSampleRate)
     
     // Initialize smoothed parameters with reasonable smoothing time (50ms)
     smoothedDepth.reset(newSampleRate, 0.05);
-    smoothedDepth.setCurrentAndTargetValue(1.0f);
+    // Don't reset depth value - preserve whatever was set via setDepth()
     
     smoothedSymmetry.reset(newSampleRate, 0.05);
-    smoothedSymmetry.setCurrentAndTargetValue(0.5f);
+    //smoothedSymmetry.setCurrentAndTargetValue(0.5f);
     
     // Initialize wavetable (thread-safe as it's only called during prepare)
     initializeWaveTable();
@@ -71,6 +71,7 @@ void LFO::setDepth(float newDepth)
     // Clamp depth to valid range and set target for smoothing
     float clampedDepth = std::clamp(newDepth, 0.0f, 1.0f);
     smoothedDepth.setTargetValue(clampedDepth);
+    //DBG("LFO Smoothed Depth = " << smoothedDepth.getCurrentValue());
 }
 
 void LFO::setPhaseOffset(double phaseOffsetInRadians)
@@ -960,6 +961,11 @@ void LFO::updateFromPlayHead(juce::AudioPlayHead* playHead)
         // Fallback when no host available
         updateHostInfo(120.0, true);
     }
+}
+
+void LFO::setName(int newName)
+{
+	mName = newName;
 }
 
 } // namespace audio_plugin 
