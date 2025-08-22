@@ -963,9 +963,4 @@ void LFO::updateFromPlayHead(juce::AudioPlayHead* playHead)
     }
 }
 
-void LFO::setName(int newName)
-{
-	mName = newName;
-}
-
 } // namespace audio_plugin 

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "Chorus/Chorus.h"
+#include "DelayLineFactory/DelayLineFactory.h"
 
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
@@ -59,6 +60,13 @@ namespace audio_plugin {
                 "chorus_enabled",           // parameterID
                 "Chorus Enabled",           // parameter name
                 true                        // default value
+            ),
+            
+            std::make_unique<juce::AudioParameterChoice>(
+                "chorus_delay_type",        // parameterID
+                "Delay Type",               // parameter name
+                juce::StringArray{"Digital", "Bucket Brigade"}, // choices
+                1                           // default value (Bucket Brigade)
             ),
             
             // Stereo Chorus parameters
@@ -132,6 +140,9 @@ namespace audio_plugin {
         }),
         chorus(MAX_CHORUS_VOICES)  // Initialize chorus with MAX_CHORUS_VOICES voices maximum
     {
+        // Add this processor as a listener to parameter changes
+        parameters.state.addListener(this);
+        
         // Initialize global parameter pointers for quick access
         chorusRateParam = parameters.getRawParameterValue("chorus_rate");
         chorusDepthParam = parameters.getRawParameterValue("chorus_depth");
@@ -139,6 +150,14 @@ namespace audio_plugin {
         chorusBaseDelayParam = parameters.getRawParameterValue("chorus_base_delay");
         chorusVoiceCountParam = parameters.getRawParameterValue("chorus_voice_count");
         chorusEnabledParam = parameters.getRawParameterValue("chorus_enabled");
+        chorusDelayTypeParam = parameters.getRawParameterValue("chorus_delay_type");
+        
+        // Debug output for delay type parameter initialization
+        if (chorusDelayTypeParam) {
+            float initialDelayTypeChoice = *chorusDelayTypeParam;
+            DBG("PluginProcessor: Initial delay type parameter value: " << initialDelayTypeChoice 
+                << " (0.0=Digital, 1.0=Bucket Brigade)");
+        }
         
         // Initialize stereo parameter pointers
         chorusStereoModeParam = parameters.getRawParameterValue("chorus_stereo_mode");
@@ -158,7 +177,7 @@ namespace audio_plugin {
         chorusHPFCutoffParam = parameters.getRawParameterValue("chorus_hpf_cutoff");
         
         // Verify global parameter initialization
-        if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam) {
+        if (!chorusRateParam || !chorusDepthParam || !chorusMixParam || !chorusBaseDelayParam || !chorusVoiceCountParam || !chorusEnabledParam || !chorusDelayTypeParam) {
             DBG("PluginProcessor: Warning - Some global chorus parameters failed to initialize");
         }
         
@@ -180,7 +199,10 @@ namespace audio_plugin {
         DBG("PluginProcessor: Multi-voice Chorus parameters initialized");
     }
 
-    AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
+    AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {
+        // Remove this processor as a listener to parameter changes
+        parameters.state.removeListener(this);
+    }
 
     const juce::String AudioPluginAudioProcessor::getName() const {
         return JucePlugin_Name;
@@ -311,6 +333,25 @@ namespace audio_plugin {
         if (chorusEnabledParam && *chorusEnabledParam > 0.5f) {
             // Only process if chorus is enabled
             
+            // Check if delay type needs to be updated
+            if (delayTypeChanged.load()) {
+                // Get the current delay type parameter value
+                if (chorusDelayTypeParam) {
+                    float delayTypeChoice = *chorusDelayTypeParam;
+                    // Choice parameter returns: 0.0 = "Digital", 1.0 = "Bucket Brigade"
+                    DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
+                    
+                    // Update the chorus delay type
+                    chorus.setDelayType(delayType);
+                    
+                    DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade") 
+                        << " (raw value: " << delayTypeChoice << ")");
+                }
+                
+                // Clear the flag
+                delayTypeChanged.store(false);
+            }
+            
             // Get all current parameter values
             float rate = chorusRateParam ? static_cast<float>(*chorusRateParam) : 0.8f;
             float depth = chorusDepthParam ? static_cast<float>(*chorusDepthParam) : 0.5f;
@@ -347,6 +388,73 @@ namespace audio_plugin {
             // If chorus is disabled, just pass through the input
             // (or apply dry/wet mix if needed)
         }
+    }
+    
+    void AudioPluginAudioProcessor::valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged,
+                                                           const juce::Identifier& property)
+    {
+        // Handle parameter changes efficiently
+        // This is called when any parameter value changes, not on every audio sample
+        // This approach is much more efficient than checking parameter values in processBlock
+        // because it only runs when parameters actually change, not on every audio sample
+        
+        // Debug output to show which property changed
+        DBG("PluginProcessor: Property changed: " << property.toString() << " in tree: " << treeWhosePropertyHasChanged.getType().toString());
+        
+        // In JUCE's APVTS, parameter values are stored under a "value" property
+        // We need to check the parent tree to identify which parameter this belongs to
+        if (property == juce::Identifier("value")) {
+            // Get the parent tree (which should be the parameter tree)
+            auto parentTree = treeWhosePropertyHasChanged.getParent();
+            if (parentTree.isValid()) {
+                // The parent tree should be the individual parameter
+                juce::String paramID = parentTree.getType().toString();
+                DBG("PluginProcessor: Parameter ID: " << paramID);
+                
+                // Also check the grandparent to see the full tree structure
+                auto grandParentTree = parentTree.getParent();
+                if (grandParentTree.isValid()) {
+                    DBG("PluginProcessor: Grandparent tree type: " << grandParentTree.getType().toString());
+                }
+                
+                // Check if the tree has a name property (alternative way to identify parameters)
+                if (parentTree.hasProperty("name")) {
+                    juce::String paramName = parentTree.getProperty("name").toString();
+                    DBG("PluginProcessor: Parameter name from property: " << paramName);
+                    
+                    // Handle delay type changes using the name property
+                    if (paramName == "chorus_delay_type") {
+                        delayTypeChanged.store(true);
+                        DBG("PluginProcessor: Delay type change detected via name property - flag set");
+                        return;
+                    }
+                }
+                
+                // Handle delay type changes using tree type
+                if (paramID == "chorus_delay_type") {
+                    // Just set a flag - the actual update will happen in processBlock
+                    delayTypeChanged.store(true);
+                    DBG("PluginProcessor: Delay type change detected via tree type - flag set");
+                }
+            }
+        }
+        
+        // Fallback: If we can't identify which parameter changed, just check if it might be the delay type
+        // This ensures we don't miss delay type changes even if the tree structure is unexpected
+        if (chorusDelayTypeParam) {
+            static float lastDelayTypeValue = -1.0f;
+            float currentDelayTypeValue = *chorusDelayTypeParam;
+            if (currentDelayTypeValue != lastDelayTypeValue) {
+                lastDelayTypeValue = currentDelayTypeValue;
+                delayTypeChanged.store(true);
+                DBG("PluginProcessor: Delay type change detected via fallback - flag set");
+            }
+        }
+        
+        // Note: Other parameters (rate, depth, mix, etc.) are still handled in processBlock
+        // because they need to be applied on every audio sample for smooth interpolation
+        // Only parameters that require expensive operations (like recreating delay lines)
+        // should be handled here in valueTreePropertyChanged
     }
 
     bool AudioPluginAudioProcessor::hasEditor() const {

@@ -28,7 +28,7 @@ namespace audio_plugin {
  * @code
  * // In processBlock:
  * float lfoValue = std::sin(lfoPhase);
- * float delayMs = 20.0f + (lfoValue * 10.0f);  // 20ms � 10ms
+ * float delayMs = 20.0f + (lfoValue * 10.0f);  // 20ms ± 10ms
  * delay.setDelayTime(delayMs * 0.001f);  // Convert to seconds
  * delay.processBlock(audioBuffer, 0.5f);  // 50% wet mix
  * @endcode
@@ -51,7 +51,7 @@ public:
     /**
      * @brief Destructor
      */
-    ~DelayLine();
+    virtual ~DelayLine();
 
     /**
      * @brief Prepare the delay line for processing
@@ -62,7 +62,7 @@ public:
      * Must be called before processing any audio. This allocates the internal
      * buffers and resets all state.
      */
-    void prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels);
+    virtual void prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels);
 
     /**
      * @brief Set the delay time for all channels
@@ -73,7 +73,7 @@ public:
      * modulation effects (chorus, flanger, etc.) without zipper noise.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    void setDelayTime(double delayTimeInSeconds);
+    virtual void setDelayTime(double delayTimeInSeconds);
 
     /**
      * @brief Set the delay time with sample-accurate precision
@@ -83,7 +83,7 @@ public:
      * this supports smooth modulation at audio rate.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    void setDelayInSamples(double delayInSamples);
+    virtual void setDelayInSamples(double delayInSamples);
     
     /**
      * @brief Set the delay time immediately without smoothing
@@ -92,39 +92,49 @@ public:
      * Bypasses smoothing for instant changes. Use with caution as this
      * may cause clicks if called during playback.
      */
-    void setDelayTimeImmediate(double delayTimeInSeconds);
+    virtual void setDelayTimeImmediate(double delayTimeInSeconds);
     
     /**
      * @brief Set the smoothing ramp time for delay changes
      * @param rampTimeInSeconds Time in seconds for delay changes to ramp
      * 
-     * Default is 0.05 seconds (50ms). Set to 0 to disable smoothing.
+     * Controls how quickly delay time changes are applied. Longer ramp times
+     * prevent clicks but reduce modulation responsiveness. Shorter ramp times
+     * allow faster modulation but may cause artifacts.
+     * 
+     * Default: 0.05 seconds (50ms) - good balance for most applications
      */
-    void setSmoothingTime(double rampTimeInSeconds);
+    virtual void setSmoothingTime(double rampTimeInSeconds);
 
     /**
      * @brief Get the current delay time in seconds
      * @return Current delay time in seconds
      */
-    double getDelayTime() const;
+    virtual double getDelayTime() const;
 
     /**
-     * @brief Get the current delay in samples
-     * @return Current delay in samples (may be fractional)
+     * @brief Get the current delay time in samples
+     * @return Current delay time in samples (can be fractional)
      */
-    double getDelayInSamples() const;
+    virtual double getDelayInSamples() const;
 
     /**
-     * @brief Set the interpolation type
-     * @param type The interpolation type to use
+     * @brief Get the current smoothed delay time in samples
+     * @return Current smoothed delay time in samples
      */
-    void setInterpolationType(InterpolationType type);
+    virtual double getCurrentDelayInSamples() const;
+
+    /**
+     * @brief Set the interpolation type for fractional delays
+     * @param type Interpolation type to use
+     */
+    virtual void setInterpolationType(InterpolationType type);
 
     /**
      * @brief Get the current interpolation type
      * @return Current interpolation type
      */
-    InterpolationType getInterpolationType() const;
+    virtual InterpolationType getInterpolationType() const;
 
     /**
      * @brief Process a single sample for a specific channel
@@ -132,78 +142,83 @@ public:
      * @param input Input sample
      * @return Delayed output sample
      * 
-     * Note: prepare() must be called before processing
+     * This is the core processing method. It reads from the delay buffer
+     * at the current delay time and writes the new input sample.
+     * 
+     * Thread Safety: Safe to call from different threads for different channels
      */
-    float processSample(int channel, float input);
+    virtual float processSample(int channel, float input);
 
     /**
      * @brief Process a block of audio
      * @param buffer Audio buffer to process in-place
      * 
-     * Processes all channels in the buffer. The delayed signal replaces
-     * the input signal in the buffer.
+     * Processes all channels in the buffer. This is more efficient than
+     * calling processSample() for each sample individually.
+     * 
+     * Thread Safety: Safe to call from different threads for different channels
      */
-    void processBlock(juce::AudioBuffer<float>& buffer);
-
-
+    virtual void processBlock(juce::AudioBuffer<float>& buffer);
 
     /**
      * @brief Clear all delay buffers
      * 
-     * Resets all internal buffers to zero and resets write positions.
+     * Resets all delay buffers to silence. Useful for stopping feedback
+     * or clearing accumulated delay content.
      */
-    void clear();
+    virtual void clear();
 
     /**
-     * @brief Check if the delay line is prepared and ready to process
-     * @return True if prepare() has been called and the delay is ready
+     * @brief Check if the delay line is prepared for processing
+     * @return true if prepared, false otherwise
      */
-    bool isPrepared() const;
+    virtual bool isPrepared() const;
 
     /**
      * @brief Get the maximum delay time in seconds
-     * @return Maximum delay time that was set in prepare()
+     * @return Maximum delay time in seconds
      */
-    double getMaxDelayTime() const;
+    virtual double getMaxDelayTime() const;
 
     /**
-     * @brief Get the maximum delay in samples
-     * @return Maximum delay in samples based on sample rate and max delay time
+     * @brief Get the maximum delay time in samples
+     * @return Maximum delay time in samples
      */
-    int getMaxDelayInSamples() const;
+    virtual int getMaxDelayInSamples() const;
 
     /**
      * @brief Get the current sample rate
-     * @return Sample rate in Hz
+     * @return Current sample rate in Hz
      */
-    double getSampleRate() const;
+    virtual double getSampleRate() const;
 
 private:
-    // Internal helper methods
-    float processSampleLinearInterp(int channel, float input);
-    float processSampleNoInterp(int channel, float input);
-    double getCurrentDelayInSamples() const;
+    // Constants
+    static constexpr double DEFAULT_SMOOTHING_TIME = 0.05;  // 50ms default
+    static constexpr double MIN_DELAY_SAMPLES = 1.0;        // Minimum 1 sample delay
     
-    // Per-channel circular buffers and write indices
-    std::vector<std::vector<float>> buffers;
-    std::vector<int> writeIndices;
+    // Member variables
+    std::vector<std::vector<float>> buffers;        // Per-channel circular buffers
+    std::vector<int> writeIndices;                  // Write position for each channel
+    std::vector<double> readPositions;              // Read position for each channel
+    std::atomic<bool> prepared{false};              // Preparation state
+    double sampleRate{0.0};                         // Current sample rate
+    int numChannels{0};                             // Number of audio channels
+    double maxDelayInSamples{0.0};                  // Maximum delay in samples
+    int bufferSize{0};                              // Size of each circular buffer
     
-    // Delay parameters with smoothing
+    // Smoothing and interpolation
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedDelay;
-    double targetDelayInSamples{0.0};
-    double sampleRate{44100.0};
-    double maxDelayInSamples{0.0};
-    int bufferSize{0};
-    int numChannels{0};
-    
-    // State
-    std::atomic<bool> prepared{false};
+    double targetDelayInSamples{0.0};               // Target delay time
     InterpolationType interpolationType{InterpolationType::Linear};
     
-    // Constants
-    static constexpr double MIN_DELAY_SAMPLES = 0.0;
-    static constexpr double DEFAULT_SMOOTHING_TIME = 0.05; // 50ms default
-    
+    // Helper methods
+    float processSampleLinearInterp(int channel, float input);
+    float processSampleNoInterp(int channel, float input);
+    float getInterpolatedSample(int channel, double readPosition);
+    void updateReadPositions();
+
+    //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DelayLine)
 };
 

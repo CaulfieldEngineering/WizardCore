@@ -7,7 +7,8 @@
 
 namespace audio_plugin {
 
-class AudioPluginAudioProcessor : public juce::AudioProcessor
+class AudioPluginAudioProcessor : public juce::AudioProcessor,
+                                  public juce::ValueTree::Listener
 {
 public:
     //==============================================================================
@@ -48,6 +49,11 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     //==============================================================================
+    // Parameter change handling
+    void valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged,
+                                 const juce::Identifier& property) override;
+
+    //==============================================================================
     // Public access to parameters for the editor
     juce::AudioProcessorValueTreeState parameters;
     
@@ -82,6 +88,7 @@ private:
 	std::atomic<float>* chorusBaseDelayParam = nullptr;
 	std::atomic<float>* chorusVoiceCountParam = nullptr;
 	std::atomic<float>* chorusEnabledParam = nullptr;
+	std::atomic<float>* chorusDelayTypeParam = nullptr;
 	
 	// Stereo Chorus parameters
 	std::atomic<float>* chorusStereoModeParam = nullptr;
@@ -99,6 +106,9 @@ private:
 	// HPF parameters
 	std::atomic<float>* chorusHPFEnabledParam = nullptr;
 	std::atomic<float>* chorusHPFCutoffParam = nullptr;
+	
+	// Simple flag to track delay type changes
+	std::atomic<bool> delayTypeChanged{false};
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

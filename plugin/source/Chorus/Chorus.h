@@ -3,7 +3,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include "../LFO/LFO.h"
-#include "../DelayLine/DelayLine.h"
+//#include "../DelayLine/DelayLine.h"
+#include "../DelayLineFactory/DelayLineFactory.h"
 #include <array>
 
 namespace audio_plugin {
@@ -31,6 +32,11 @@ namespace audio_plugin {
  * 
  * chorus.setVoiceMix(0, 0.7);       // 70% wet, 30% dry for voice 0
  * chorus.setVoiceBaseDelay(0, 30.0); // 30ms base delay for voice 0
+ * 
+ * // Switch between different delay types
+ * chorus.setDelayType(DelayType::BBDelay);     // Use BBD delay for vintage character
+ * chorus.setDelayType(DelayType::DigitalDelay); // Use clean delay for pristine sound
+ * 
  * chorus.processBlock(audioBuffer);
  * @endcode
  */
@@ -187,6 +193,12 @@ public:
      * @return True if prepare() has been called and the chorus is ready
      */
     bool isPrepared() const;
+    
+    /**
+     * @brief Switch between different delay types for all voices
+     * @param delayType The type of delay to use (DigitalDelay or BBDelay)
+     */
+    void setDelayType(DelayType delayType);
 
     // Getters (all thread-safe)
     // Note: getRate() and getDepth() removed - access via individual LFO objects
@@ -195,6 +207,7 @@ public:
     float getBaseDelay() const { return baseDelay.load(); }
     double getSampleRate() const { return sampleRate.load(); }
     bool isEnabled() const { return enabled.load(); }
+    DelayType getDelayType() const { return currentDelayType.load(); }
     
     // Per-voice getters
     float getVoiceRate(int voiceIndex) const;
@@ -259,7 +272,7 @@ private:
     struct Voice {
         // Dual LFO system for independent channel control
         std::array<LFO, 2> lfos;  // [0] = left/mid, [1] = right/side
-        std::array<DelayLine, 2> delayLines;  // [0] = left/mid, [1] = right/side
+        std::array<std::unique_ptr<DelayLine>, 2> delayLines;  // [0] = left/mid, [1] = right/side - polymorphic for different delay types
         
         std::atomic<bool> enabled{false};
         
@@ -291,6 +304,7 @@ private:
     std::atomic<bool> prepared{false};
     std::atomic<int> numActiveVoices{1};
     std::atomic<bool> enabled{true};
+    std::atomic<DelayType> currentDelayType{DelayType::BBDelay};  // Track current delay type - default to BBD
     
     // Constants
     static constexpr int DEFAULT_MAX_VOICES = 5;

@@ -245,4 +245,6 @@ double DelayLine::getSampleRate() const
     return sampleRate;
 }
 
+
+
 } // namespace audio_plugin
