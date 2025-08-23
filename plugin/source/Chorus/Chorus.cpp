@@ -1,7 +1,7 @@
 #include "Chorus.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
-#include "../DelayLineFactory/DelayLineFactory.h"
+#include "../DelayLine/DelayLine.h"
 
 namespace audio_plugin {
 
@@ -42,8 +42,8 @@ Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX
         // Initialize delay lines with default type (BBDelay - matches currentDelayType default)
         // Note: currentDelayType member variable isn't fully initialized yet during construction,
         // so we hardcode the initial type to match the default
-        voices[i].delayLines[0] = DelayLineFactory::createBBDelay();
-        voices[i].delayLines[1] = DelayLineFactory::createBBDelay();
+        voices[i].delayLines[0] = DelayLine::createBBD();
+        voices[i].delayLines[1] = DelayLine::createBBD();
         
         // Debug output for initial delay line creation
         DBG("Chorus: Voice " << i << " initialized with BBDelay (hardcoded during construction)");
@@ -117,7 +117,7 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
         // Prepare both delay lines independently
         for (int channel = 0; channel < 2; ++channel) {
             // Create delay line using factory based on current setting
-            voice.delayLines[channel] = DelayLineFactory::createDelayLine(currentDelayType.load());
+            voice.delayLines[channel] = DelayLine::create(currentDelayType.load());
             
             voice.delayLines[channel]->prepare(sampleRateIn, maxDelayTime, 1);  // Mono delay line per channel
             voice.delayLines[channel]->setDelayTime(voice.currentDelayTime);
@@ -1026,7 +1026,7 @@ void Chorus::setDelayType(DelayType delayType)
                 }
                 
                 // Create new delay line of the specified type
-                voices[i].delayLines[ch] = DelayLineFactory::createDelayLine(delayType);
+                voices[i].delayLines[ch] = DelayLine::create(delayType);
                 
                 // Re-prepare with same settings
                 double maxDelayTime = (voices[i].baseDelay.load() + MAX_DELAY_MS) * 0.001;

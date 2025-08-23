@@ -7,30 +7,29 @@
 namespace audio_plugin {
 
 /**
- * @brief A thread-safe, interpolating delay line for audio processing
+ * @brief Available delay line types
+ */
+enum class DelayType {
+    DigitalDelay,    ///< Clean digital delay (DigitalDelayLine)
+    BBDelay          ///< Bucket Brigade Delay emulation (BBDelayLine)
+};
+
+/**
+ * @brief Abstract base interface for all delay line types
  * 
- * This class provides a circular buffer-based delay line with linear interpolation
- * for smooth delay time changes and modulation. It supports multi-channel processing
- * with independent delay buffers per channel.
+ * This abstract class defines the common interface that all delay line implementations
+ * must provide. It enables polymorphic usage and seamless switching between different
+ * delay types (digital, BBD, etc.) in effects like Chorus.
  * 
- * Thread Safety: Thread-safe for parallel channel processing
- * Memory: Allocates (maxDelaySeconds * sampleRate * numChannels * sizeof(float)) bytes
+ * Thread Safety: All implementations must be thread-safe
+ * Memory: Implementation-specific allocation
  * 
- * Usage Example - Basic Delay:
+ * Usage Example - Polymorphic Delay:
  * @code
- * DelayLine delay;
- * delay.prepare(48000, 1.0, 2);  // 48kHz, 1 second max, stereo
- * delay.setDelayTime(0.25);       // 250ms delay
- * delay.processBlock(audioBuffer);
- * @endcode
- * 
- * Usage Example - Modulated Delay (Chorus/Flanger):
- * @code
- * // In processBlock:
- * float lfoValue = std::sin(lfoPhase);
- * float delayMs = 20.0f + (lfoValue * 10.0f);  // 20ms ± 10ms
- * delay.setDelayTime(delayMs * 0.001f);  // Convert to seconds
- * delay.processBlock(audioBuffer, 0.5f);  // 50% wet mix
+ * std::unique_ptr<DelayLine> delay = DelayLineFactory::createDelayLine(DelayType::DigitalDelay);
+ * delay->prepare(48000, 1.0, 2);  // 48kHz, 1 second max, stereo
+ * delay->setDelayTime(0.25);       // 250ms delay
+ * delay->processBlock(audioBuffer);
  * @endcode
  */
 class DelayLine {
@@ -44,14 +43,9 @@ public:
     };
 
     /**
-     * @brief Default constructor
+     * @brief Virtual destructor for proper cleanup
      */
-    DelayLine();
-    
-    /**
-     * @brief Destructor
-     */
-    virtual ~DelayLine();
+    virtual ~DelayLine() = default;
 
     /**
      * @brief Prepare the delay line for processing
@@ -62,7 +56,7 @@ public:
      * Must be called before processing any audio. This allocates the internal
      * buffers and resets all state.
      */
-    virtual void prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels);
+    virtual void prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels) = 0;
 
     /**
      * @brief Set the delay time for all channels
@@ -73,7 +67,7 @@ public:
      * modulation effects (chorus, flanger, etc.) without zipper noise.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    virtual void setDelayTime(double delayTimeInSeconds);
+    virtual void setDelayTime(double delayTimeInSeconds) = 0;
 
     /**
      * @brief Set the delay time with sample-accurate precision
@@ -83,7 +77,7 @@ public:
      * this supports smooth modulation at audio rate.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    virtual void setDelayInSamples(double delayInSamples);
+    virtual void setDelayInSamples(double delayInSamples) = 0;
     
     /**
      * @brief Set the delay time immediately without smoothing
@@ -92,134 +86,148 @@ public:
      * Bypasses smoothing for instant changes. Use with caution as this
      * may cause clicks if called during playback.
      */
-    virtual void setDelayTimeImmediate(double delayTimeInSeconds);
+    virtual void setDelayTimeImmediate(double delayTimeInSeconds) = 0;
     
     /**
      * @brief Set the smoothing ramp time for delay changes
      * @param rampTimeInSeconds Time in seconds for delay changes to ramp
      * 
-     * Controls how quickly delay time changes are applied. Longer ramp times
-     * prevent clicks but reduce modulation responsiveness. Shorter ramp times
-     * allow faster modulation but may cause artifacts.
+     * Controls how quickly delay time changes are smoothed. Longer ramp times
+     * prevent clicks but may limit modulation speed. Shorter ramp times allow
+     * faster modulation but may introduce artifacts.
      * 
-     * Default: 0.05 seconds (50ms) - good balance for most applications
+     * Default: 0.01 seconds (10ms) - good balance for most uses
      */
-    virtual void setSmoothingTime(double rampTimeInSeconds);
-
+    virtual void setSmoothingTime(double rampTimeInSeconds) = 0;
+    
     /**
      * @brief Get the current delay time in seconds
      * @return Current delay time in seconds
      */
-    virtual double getDelayTime() const;
-
+    virtual double getDelayTime() const = 0;
+    
     /**
      * @brief Get the current delay time in samples
      * @return Current delay time in samples (can be fractional)
      */
-    virtual double getDelayInSamples() const;
-
+    virtual double getDelayInSamples() const = 0;
+    
     /**
-     * @brief Get the current smoothed delay time in samples
-     * @return Current smoothed delay time in samples
+     * @brief Get the current actual delay in samples (may differ from set value during smoothing)
+     * @return Current actual delay in samples
      */
-    virtual double getCurrentDelayInSamples() const;
-
+    virtual double getCurrentDelayInSamples() const = 0;
+    
     /**
-     * @brief Set the interpolation type for fractional delays
-     * @param type Interpolation type to use
+     * @brief Set the interpolation type for fractional delay support
+     * @param type The interpolation type to use
+     * 
+     * Linear interpolation provides smoother delay changes and better quality
+     * for fractional delays, but uses slightly more CPU. None is faster but
+     * may produce artifacts during delay time changes.
      */
-    virtual void setInterpolationType(InterpolationType type);
-
+    virtual void setInterpolationType(InterpolationType type) = 0;
+    
     /**
      * @brief Get the current interpolation type
      * @return Current interpolation type
      */
-    virtual InterpolationType getInterpolationType() const;
-
+    virtual InterpolationType getInterpolationType() const = 0;
+    
     /**
-     * @brief Process a single sample for a specific channel
-     * @param channel Channel index (0-based)
-     * @param input Input sample
-     * @return Delayed output sample
+     * @brief Process a single sample through the delay line
+     * @param channel The channel to process (0-based)
+     * @param input The input sample
+     * @return The delayed output sample
      * 
-     * This is the core processing method. It reads from the delay buffer
-     * at the current delay time and writes the new input sample.
+     * This is the core processing function. It reads from the delay buffer
+     * at the current delay time and writes the input sample to the buffer.
      * 
      * Thread Safety: Safe to call from different threads for different channels
      */
-    virtual float processSample(int channel, float input);
-
+    virtual float processSample(int channel, float input) = 0;
+    
     /**
-     * @brief Process a block of audio
-     * @param buffer Audio buffer to process in-place
+     * @brief Process an entire audio block
+     * @param buffer The audio buffer to process
      * 
-     * Processes all channels in the buffer. This is more efficient than
-     * calling processSample() for each sample individually.
+     * Processes all samples in the buffer through the delay line.
+     * This is more efficient than calling processSample() for each sample.
      * 
      * Thread Safety: Safe to call from different threads for different channels
      */
-    virtual void processBlock(juce::AudioBuffer<float>& buffer);
-
+    virtual void processBlock(juce::AudioBuffer<float>& buffer) = 0;
+    
     /**
-     * @brief Clear all delay buffers
+     * @brief Process an audio block with wet/dry mixing
+     * @param buffer The audio buffer to process
+     * @param wetMix The wet signal mix amount (0.0 = dry only, 1.0 = wet only)
      * 
-     * Resets all delay buffers to silence. Useful for stopping feedback
-     * or clearing accumulated delay content.
+     * Processes the buffer and mixes the delayed signal with the original.
+     * Useful for effects where you want to blend the delayed and original signals.
+     * 
+     * Thread Safety: Safe to call from different threads for different channels
      */
-    virtual void clear();
-
+    virtual void processBlock(juce::AudioBuffer<float>& buffer, float wetMix) = 0;
+    
     /**
-     * @brief Check if the delay line is prepared for processing
-     * @return true if prepared, false otherwise
+     * @brief Clear all delay buffers and reset state
+     * 
+     * Resets all internal buffers to zero and clears any accumulated state.
+     * Useful for stopping feedback loops or resetting the effect.
      */
-    virtual bool isPrepared() const;
-
+    virtual void clear() = 0;
+    
+    /**
+     * @brief Check if the delay line is ready for processing
+     * @return true if prepare() has been called, false otherwise
+     */
+    virtual bool isPrepared() const = 0;
+    
     /**
      * @brief Get the maximum delay time in seconds
      * @return Maximum delay time in seconds
      */
-    virtual double getMaxDelayTime() const;
-
+    virtual double getMaxDelayTime() const = 0;
+    
     /**
      * @brief Get the maximum delay time in samples
      * @return Maximum delay time in samples
      */
-    virtual int getMaxDelayInSamples() const;
-
+    virtual int getMaxDelayInSamples() const = 0;
+    
     /**
      * @brief Get the current sample rate
      * @return Current sample rate in Hz
      */
-    virtual double getSampleRate() const;
+    virtual double getSampleRate() const = 0;
 
-private:
-    // Constants
-    static constexpr double DEFAULT_SMOOTHING_TIME = 0.05;  // 50ms default
-    static constexpr double MIN_DELAY_SAMPLES = 1.0;        // Minimum 1 sample delay
+    // Factory methods - static functions to create different delay line types
+    /**
+     * @brief Create a delay line instance of the specified type
+     * @param type The type of delay line to create
+     * @return Unique pointer to the created delay line
+     */
+    static std::unique_ptr<DelayLine> create(DelayType type = DelayType::BBDelay);
     
-    // Member variables
-    std::vector<std::vector<float>> buffers;        // Per-channel circular buffers
-    std::vector<int> writeIndices;                  // Write position for each channel
-    std::vector<double> readPositions;              // Read position for each channel
-    std::atomic<bool> prepared{false};              // Preparation state
-    double sampleRate{0.0};                         // Current sample rate
-    int numChannels{0};                             // Number of audio channels
-    double maxDelayInSamples{0.0};                  // Maximum delay in samples
-    int bufferSize{0};                              // Size of each circular buffer
+    /**
+     * @brief Create a clean digital delay line
+     * @return Unique pointer to a DigitalDelayLine instance
+     */
+    static std::unique_ptr<DelayLine> createDigital();
     
-    // Smoothing and interpolation
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedDelay;
-    double targetDelayInSamples{0.0};               // Target delay time
-    InterpolationType interpolationType{InterpolationType::Linear};
+    /**
+     * @brief Create a BBD delay line with vintage characteristics
+     * @return Unique pointer to a BBDelayLine instance
+     */
+    static std::unique_ptr<DelayLine> createBBD();
     
-    // Helper methods
-    float processSampleLinearInterp(int channel, float input);
-    float processSampleNoInterp(int channel, float input);
-    float getInterpolatedSample(int channel, double readPosition);
-    void updateReadPositions();
-
-    //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DelayLine)
+    /**
+     * @brief Create a BBD delay line with specified characteristics
+     * @param characteristic The BBD characteristic to use (0=Vintage, 1=Modern, 2=Dirty)
+     * @return Unique pointer to a BBDelayLine instance
+     */
+    static std::unique_ptr<DelayLine> createBBD(int characteristic);
 };
 
 } // namespace audio_plugin

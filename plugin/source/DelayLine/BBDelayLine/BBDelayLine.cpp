@@ -1,6 +1,7 @@
 #include "BBDelayLine.h"
 #include <algorithm>
 #include <cmath>
+#include <juce_audio_processors/juce_audio_processors.h>
 
 namespace audio_plugin {
 
@@ -11,8 +12,23 @@ BBDelayLine::BBDelayLine()
 
 void BBDelayLine::prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels)
 {
-    // Call base class prepare first
-    DelayLine::prepare(sampleRate, maxDelayTimeInSeconds, numChannels);
+    // Store base parameters
+    this->sampleRate = sampleRate;
+    this->maxDelayTimeInSeconds = maxDelayTimeInSeconds;
+    this->maxDelayInSamples = static_cast<int>(sampleRate * maxDelayTimeInSeconds);
+    this->numChannels = numChannels;
+    
+    // Initialize delay buffers
+    delayBuffers.resize(numChannels);
+    writeIndices.resize(numChannels);
+    readPositions.resize(numChannels);
+    
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        delayBuffers[ch].resize(maxDelayInSamples + 2, 0.0f);
+        writeIndices[ch] = 0;
+        readPositions[ch] = 0.0;
+    }
     
     // Initialize BBD-specific buffers and state
     bbBuffers.resize(numChannels);
@@ -23,7 +39,7 @@ void BBDelayLine::prepare(double sampleRate, double maxDelayTimeInSeconds, int n
     for (int ch = 0; ch < numChannels; ++ch)
     {
         // BBD buffers are smaller than main delay buffers (simulating lower internal sample rate)
-        int bbBufferSize = juce::roundToInt(clockRate / sampleRate * getMaxDelayInSamples()) + 2;
+        int bbBufferSize = juce::roundToInt(clockRate / sampleRate * maxDelayInSamples) + 2;
         bbBuffers[ch].resize(bbBufferSize);
         std::fill(bbBuffers[ch].begin(), bbBuffers[ch].end(), 0.0f);
         
@@ -32,8 +48,14 @@ void BBDelayLine::prepare(double sampleRate, double maxDelayTimeInSeconds, int n
         filterStates[ch].resize(2, 0.0f); // 2-pole filter state
     }
     
+    // Initialize smoothed delay
+    smoothedDelay.reset(sampleRate, 0.01); // 10ms default smoothing
+    
     // Calculate filter coefficient based on bandwidth reduction
     updateFilterCoefficient();
+    
+    // Mark as prepared
+    prepared.store(true);
 }
 
 void BBDelayLine::setClockRate(double clockRateHz)
@@ -110,11 +132,35 @@ BBDelayLine::BBDCharacteristic BBDelayLine::getBBDCharacteristic() const
 
 float BBDelayLine::processSample(int channel, float input)
 {
+    jassert(isPrepared());
+    jassert(channel >= 0 && channel < numChannels);
+    
     // First apply BBD processing to the input
     float bbProcessed = applyBBDProcessing(channel, input);
     
-    // Then pass through the base DigitalDelayLine processing
-    return DelayLine::processSample(channel, bbProcessed);
+    // Write the BBD-processed input to the delay buffer
+    auto& buffer = delayBuffers[channel];
+    auto& writeIndex = writeIndices[channel];
+    
+    buffer[writeIndex] = bbProcessed;
+    
+    // Get the current delay value
+    double currentDelay = smoothedDelay.getNextValue();
+    
+    // Calculate read position with wrap-around
+    double readPos = static_cast<double>(writeIndex) - currentDelay;
+    while (readPos < 0.0)
+        readPos += buffer.size();
+    
+    int readIndex = static_cast<int>(std::round(readPos)) % static_cast<int>(buffer.size());
+    
+    // Read the delayed sample
+    float output = buffer[readIndex];
+    
+    // Advance write index
+    writeIndex = (writeIndex + 1) % static_cast<int>(buffer.size());
+    
+    return output;
 }
 
 void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer)
@@ -139,10 +185,43 @@ void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer)
     }
 }
 
+void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer, float wetMix)
+{
+    jassert(isPrepared());
+    
+    const int numSamples = buffer.getNumSamples();
+    const int channelsToProcess = juce::jmin(buffer.getNumChannels(), static_cast<int>(bbBuffers.size()));
+    float dryMix = 1.0f - wetMix;
+    
+    // Update clock modulation for the entire block
+    updateClockModulation();
+    
+    // Process each channel
+    for (int ch = 0; ch < channelsToProcess; ++ch)
+    {
+        float* channelData = buffer.getWritePointer(ch);
+        
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float input = channelData[i];
+            float delayed = processSample(ch, input);
+            
+            // Mix dry and wet signals
+            channelData[i] = (input * dryMix) + (delayed * wetMix);
+        }
+    }
+}
+
 void BBDelayLine::clear()
 {
-    // Clear base class buffers
-    DelayLine::clear();
+    // Clear delay buffers
+    for (auto& buffer : delayBuffers)
+    {
+        std::fill(buffer.begin(), buffer.end(), 0.0f);
+    }
+    
+    std::fill(writeIndices.begin(), writeIndices.end(), 0);
+    std::fill(readPositions.begin(), readPositions.end(), 0.0);
     
     // Clear BBD-specific buffers
     for (auto& buffer : bbBuffers)
@@ -261,6 +340,86 @@ void BBDelayLine::updateFilterCoefficient()
     // Higher reduction = lower cutoff frequency
     float cutoffFreq = 1.0f - static_cast<float>(bandwidthReduction);
     filterCoeff = juce::jmax(0.01f, cutoffFreq * 0.8f);
+}
+
+// Required DelayLine interface implementations
+void BBDelayLine::setDelayTime(double delayTimeInSeconds)
+{
+    if (sampleRate <= 0)
+        return;
+    
+    double delayInSamples = delayTimeInSeconds * sampleRate;
+    setDelayInSamples(delayInSamples);
+}
+
+void BBDelayLine::setDelayInSamples(double delayInSamples)
+{
+    targetDelayInSamples = juce::jlimit(0.0, static_cast<double>(maxDelayInSamples), delayInSamples);
+    smoothedDelay.setTargetValue(targetDelayInSamples);
+}
+
+void BBDelayLine::setDelayTimeImmediate(double delayTimeInSeconds)
+{
+    if (sampleRate <= 0)
+        return;
+    
+    double delayInSamples = delayTimeInSeconds * sampleRate;
+    targetDelayInSamples = juce::jlimit(0.0, static_cast<double>(maxDelayInSamples), delayInSamples);
+    smoothedDelay.setCurrentAndTargetValue(targetDelayInSamples);
+}
+
+void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
+{
+    if (sampleRate > 0)
+        smoothedDelay.reset(sampleRate, rampTimeInSeconds);
+}
+
+double BBDelayLine::getDelayTime() const
+{
+    if (sampleRate <= 0)
+        return 0.0;
+    return targetDelayInSamples / sampleRate;
+}
+
+double BBDelayLine::getDelayInSamples() const
+{
+    return targetDelayInSamples;
+}
+
+double BBDelayLine::getCurrentDelayInSamples() const
+{
+    return smoothedDelay.getCurrentValue();
+}
+
+void BBDelayLine::setInterpolationType(InterpolationType type)
+{
+    // BBD doesn't use interpolation - it's analog simulation
+    (void)type; // Suppress unused parameter warning
+}
+
+DelayLine::InterpolationType BBDelayLine::getInterpolationType() const
+{
+    return InterpolationType::None; // BBD is always no interpolation
+}
+
+bool BBDelayLine::isPrepared() const
+{
+    return prepared.load();
+}
+
+double BBDelayLine::getMaxDelayTime() const
+{
+    return maxDelayTimeInSeconds;
+}
+
+int BBDelayLine::getMaxDelayInSamples() const
+{
+    return maxDelayInSamples;
+}
+
+double BBDelayLine::getSampleRate() const
+{
+    return sampleRate;
 }
 
 } // namespace audio_plugin

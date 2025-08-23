@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../DelayLine/DelayLine.h"
+#include "../DelayLine.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
 
@@ -146,6 +146,19 @@ public:
      * passed to the base delay line processing.
      */
     void processBlock(juce::AudioBuffer<float>& buffer) override;
+    
+    /**
+     * @brief Process an audio block with BBD processing and wet/dry mixing
+     * @param buffer The audio buffer to process
+     * @param wetMix The wet signal mix amount (0.0 = dry only, 1.0 = wet only)
+     * 
+     * Overrides DelayLine::processBlock() to add BBD processing.
+     * Processes the buffer and mixes the delayed signal with the original.
+     * Useful for effects where you want to blend the delayed and original signals.
+     * 
+     * Thread Safety: Safe to call from different threads for different channels
+     */
+    void processBlock(juce::AudioBuffer<float>& buffer, float wetMix) override;
 
     /**
      * @brief Clear all delay buffers and reset BBD state
@@ -154,6 +167,21 @@ public:
      * This resets all delay buffers, modulation state, and filter coefficients.
      */
     void clear() override;
+
+    // Required DelayLine interface methods
+    void setDelayTime(double delayTimeInSeconds) override;
+    void setDelayInSamples(double delayInSamples) override;
+    void setDelayTimeImmediate(double delayTimeInSeconds) override;
+    void setSmoothingTime(double rampTimeInSeconds) override;
+    double getDelayTime() const override;
+    double getDelayInSamples() const override;
+    double getCurrentDelayInSamples() const override;
+    void setInterpolationType(InterpolationType type) override;
+    InterpolationType getInterpolationType() const override;
+    bool isPrepared() const override;
+    double getMaxDelayTime() const override;
+    int getMaxDelayInSamples() const override;
+    double getSampleRate() const override;
 
     /**
      * @brief Set clock rate modulation for chorus/flanger effects
@@ -177,6 +205,23 @@ private:
     void updateClockModulation();
     float applyBandwidthFilter(int channel, float sample);
     void updateFilterCoefficient();
+    
+    // Base delay line state (required by DelayLine interface)
+    std::atomic<bool> prepared{false};
+    double sampleRate{0.0};
+    double maxDelayTimeInSeconds{0.0};
+    int maxDelayInSamples{0};
+    int numChannels{0};
+    
+    // Delay buffers and state
+    std::vector<std::vector<float>> delayBuffers;
+    std::vector<int> writeIndices;
+    std::vector<double> readPositions;
+    
+    // Delay time control
+    double targetDelayInSamples{0.0};
+    double currentDelayInSamples{0.0};
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedDelay;
     
     // BBD parameters
     double clockRate{2000.0};           // Internal clock rate in Hz

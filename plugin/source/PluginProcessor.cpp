@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "Chorus/Chorus.h"
-#include "DelayLineFactory/DelayLineFactory.h"
 
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
