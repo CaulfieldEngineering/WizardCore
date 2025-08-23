@@ -16,29 +16,29 @@ Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX
     // Allocate voices array
     voices = std::make_unique<Voice[]>(maxVoices);
     
-    // Initialize all voices with default values
-    for (int i = 0; i < maxVoices; ++i) {
-        voices[i].enabled = (i < numActiveVoices); // Enable voices based on numActiveVoices parameter
-        voices[i].mix = calculateVoiceMixRatio(i); // Decreasing mix for each voice (0.5, 0.4, 0.3, 0.2, 0.1)
-        voices[i].baseDelay = 30.0f + (i * 3.0f); // Slightly different delays for each voice (30, 33, 36, 39, 42)
-        voices[i].currentLfoValue = 0.0f;
-        voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
-        
-        // Initialize LFO objects with default parameters
-        float voiceRate = 0.8f + (i * 0.15f); // Slightly different rates for each voice
-        float voiceDepth = 0.04f;
-        float voicePhase = maxVoices > 1 ? i * (360.0f / maxVoices) : 0.0f; // Evenly distribute phases
-        
-        // Set LFO parameters directly on LFO objects
-        voices[i].lfos[0].setFrequency(voiceRate);
-        voices[i].lfos[0].setDepth(voiceDepth);
-        voices[i].lfos[0].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
-        voices[i].lfos[0].setEnabled(voices[i].enabled.load());
-        
-        voices[i].lfos[1].setFrequency(voiceRate);
-        voices[i].lfos[1].setDepth(voiceDepth);
-        voices[i].lfos[1].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
-        voices[i].lfos[1].setEnabled(voices[i].enabled.load());
+            // Initialize all voices with default values
+        for (int i = 0; i < maxVoices; ++i) {
+            voices[i].enabled = (i < numActiveVoices); // Enable voices based on numActiveVoices parameter
+            voices[i].mix = calculateVoiceMixRatio(i); // Decreasing mix for each voice (0.5, 0.4, 0.3, 0.2, 0.1)
+            voices[i].baseDelay = 30.0f + (i * 3.0f); // Slightly different delays for each voice (30, 33, 36, 39, 42)
+            voices[i].currentLfoValue = 0.0f;
+            voices[i].currentDelayTime = voices[i].baseDelay.load() * 0.001f;
+            
+            // Initialize LFO objects with default parameters
+            float voiceRate = 0.8f;      // keep unified base rate to reduce perceived detuning
+            float voiceDepth = 0.04f;
+            float voicePhase = maxVoices > 1 ? i * (360.0f / maxVoices) : 0.0f; // Evenly distribute phases
+            
+            // Set LFO parameters directly on LFO objects
+            voices[i].lfos[0].setFrequency(voiceRate);
+            voices[i].lfos[0].setDepth(voiceDepth);
+            voices[i].lfos[0].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+            voices[i].lfos[0].setEnabled(voices[i].enabled.load());
+            
+            voices[i].lfos[1].setFrequency(voiceRate);
+            voices[i].lfos[1].setDepth(voiceDepth);
+            voices[i].lfos[1].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+            voices[i].lfos[1].setEnabled(voices[i].enabled.load());
         
         // Initialize delay lines with default type (BBDelay - good vintage settings baked in)
         // Note: currentDelayType member variable isn't fully initialized yet during construction,
@@ -414,8 +414,7 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
                 // Calculate modulation offset (but don't change the base delay)
                 float modulation = lfoValues[channel] * modulationRange;
                 
-                // Apply non-linear modulation scaling for smoother pitch variations
-                modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
+                // Use linear modulation to minimize perceived detuning
                 
                 // Calculate final delay time with modulation
                 float finalDelayTime = baseDelayMs * 0.001f + modulation;
@@ -498,8 +497,7 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
                 float baseDelaySec = baseDelayMs * 0.001f;
                 float modulation = midLfoValue * modulationRange;
                 
-                // Apply non-linear modulation scaling for smoother pitch variations
-                modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
+                // Use linear modulation to minimize perceived detuning
                 
                 float midDelay = baseDelaySec + modulation;
                 
@@ -521,8 +519,7 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
                 float baseDelaySec = baseDelayMs * 0.001f;
                 float modulation = sideLfoValue * modulationRange;
                 
-                // Apply non-linear modulation scaling for smoother pitch variations
-                modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
+                // Use linear modulation to minimize perceived detuning
                 
                 float sideDelay = baseDelaySec + modulation;
                 

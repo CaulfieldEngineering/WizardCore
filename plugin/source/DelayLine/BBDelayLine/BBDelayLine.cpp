@@ -39,6 +39,11 @@ void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, in
         outputFilters[ch].reset();
     }
     
+    // Prepare internal core delay to maintain stable timing
+    coreDelay = std::make_unique<DigitalDelayLine>();
+    coreDelay->prepare(sampleRate, maxDelayTimeInSeconds, numChannels);
+    coreDelay->setInterpolationType(DelayLine::InterpolationType::Linear);
+    
     // Set initial delay time and update clock frequency
     updateClockFrequency();
     updateFilterCutoffs();
@@ -49,6 +54,7 @@ void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, in
     if (targetDelayTimeSeconds > 0.0)
     {
         updateClockFrequency();
+        coreDelay->setDelayTime(targetDelayTimeSeconds);
     }
 }
 
@@ -62,6 +68,7 @@ void BBDelayLine::setDelayTime(double delayTimeInSeconds)
     if (isPrepared())
     {
         updateClockFrequency();
+        if (coreDelay) coreDelay->setDelayTime(targetDelayTimeSeconds);
     }
 }
 
@@ -91,6 +98,7 @@ void BBDelayLine::setDelayTimeImmediate(double delayTimeInSeconds)
     // Set clock frequency immediately without smoothing
     smoothedClockFreq.setCurrentAndTargetValue(currentClockFreq);
     updateFilterCutoffs();
+    if (coreDelay) coreDelay->setDelayTimeImmediate(targetDelayTimeSeconds);
 }
 
 void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
@@ -102,6 +110,7 @@ void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
     }
     
     smoothedClockFreq.reset(sampleRate, rampTimeInSeconds);
+    if (coreDelay) coreDelay->setSmoothingTime(rampTimeInSeconds);
 }
 
 double BBDelayLine::getDelayTime() const
@@ -116,7 +125,10 @@ double BBDelayLine::getDelayInSamples() const
 
 double BBDelayLine::getCurrentDelayInSamples() const
 {
-    // Calculate current delay based on smoothed clock frequency
+    if (coreDelay && coreDelay->isPrepared())
+        return coreDelay->getCurrentDelayInSamples();
+    
+    // Fallback: Calculate current delay based on smoothed clock frequency
     if (smoothedClockFreq.getCurrentValue() <= 0.0)
         return 0.0;
         
@@ -141,13 +153,20 @@ float BBDelayLine::processSample(int channel, float input)
     jassert(channel >= 0 && channel < numChannels);
     
     // Apply input filtering if enabled
-    float filteredInput = filteringEnabled ? inputFilters[channel].process(input) : input;
+    float filteredInput = filteringEnabled ? inputFilters[channel].processSingleSampleRaw(input) : input;
     
-    // Process through BBD stages
-    float output = processStages(channel, filteredInput);
+    // Use stable timing core delay to compute delayed value at current delay setting
+    float delayedCore = coreDelay ? coreDelay->processSample(channel, filteredInput) : filteredInput;
+    
+    // Impose BBD transfer droop by running through lightweight stage model without clock shifts
+    // Approximate cumulative droop over N stages by N small one-tap leaks on each sample
+    // Use a compact approximation: y = delayedCore * pow(droopFactor, numStages * 0.25f)
+    // (0.25 reduces over-attenuation compared to full-stage cascade)
+    const float droopGain = std::pow(droopFactor, static_cast<float>(numStages) * 0.25f);
+    float output = delayedCore * droopGain;
     
     // Apply output filtering if enabled
-    float filteredOutput = filteringEnabled ? outputFilters[channel].process(output) : output;
+    float filteredOutput = filteringEnabled ? outputFilters[channel].processSingleSampleRaw(output) : output;
     
     return filteredOutput;
 }
@@ -206,6 +225,8 @@ void BBDelayLine::clear()
         filter.reset();
     for (auto& filter : outputFilters)
         filter.reset();
+    
+    if (coreDelay) coreDelay->clear();
 }
 
 bool BBDelayLine::isPrepared() const
@@ -291,16 +312,16 @@ void BBDelayLine::updateFilterCutoffs()
     if (!filteringEnabled)
         return;
         
-    // Set filter cutoff relative to current clock frequency
-    // Use a conservative cutoff to prevent aliasing
-    double currentClock = smoothedClockFreq.getCurrentValue();
-    double cutoffFreq = currentClock * 0.3;  // 30% of clock frequency
-    double cutoffRatio = std::clamp(cutoffFreq / sampleRate, 0.1, 0.9);
+    // Set LPF cutoff based on the effective BBD bandwidth (~ f_clk / 2), but
+    // relax slightly to preserve articulation; add a lower bound to avoid over-muffling.
+    const double currentClock = smoothedClockFreq.getCurrentValue();
+    const double targetCutoffHz = std::clamp(currentClock * 0.35, 3500.0, 11000.0);
     
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        inputFilters[ch].setCutoff(static_cast<float>(cutoffRatio));
-        outputFilters[ch].setCutoff(static_cast<float>(cutoffRatio));
+        auto lpf = juce::IIRCoefficients::makeLowPass(sampleRate, targetCutoffHz, 0.707f);
+        inputFilters[ch].setCoefficients(lpf);
+        outputFilters[ch].setCoefficients(lpf);
     }
 }
 

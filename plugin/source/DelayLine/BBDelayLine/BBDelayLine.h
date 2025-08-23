@@ -2,8 +2,10 @@
 
 #include "../DelayLine.h"
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include <vector>
 #include <cmath>
+#include "../DigitalDelayLine/DigitalDelayLine.h"
 
 namespace audio_plugin
 {
@@ -103,28 +105,13 @@ private:
     // Clock management
     std::vector<double> clockAccumulators;  // Per-channel clock phase
     
-    // Anti-aliasing filters (simple one-pole LPF)
-    struct SimpleFilter {
-        float state = 0.0f;
-        float coefficient = 0.7f;  // Cutoff related to clock frequency
-        
-        float process(float input) {
-            state += coefficient * (input - state);
-            return state;
-        }
-        
-        void setCutoff(float cutoffRatio) {
-            coefficient = std::clamp(cutoffRatio, 0.1f, 0.9f);
-        }
-        
-        void reset() {
-            state = 0.0f;
-        }
-    };
+    // Anti-aliasing filters (2nd-order low-pass per channel)
+    std::vector<juce::IIRFilter> inputFilters;   // One per channel
+    std::vector<juce::IIRFilter> outputFilters;  // One per channel
     
-    std::vector<SimpleFilter> inputFilters;   // One per channel
-    std::vector<SimpleFilter> outputFilters;  // One per channel
-    
+    // Core interpolating delay engine to avoid pitch drift while retaining BBD coloration
+    std::unique_ptr<DigitalDelayLine> coreDelay;
+
     // Helper methods
     void updateClockFrequency();
     void updateFilterCutoffs();
