@@ -2,9 +2,9 @@
 #include <algorithm>
 #include <cmath>
 
-// Ensure M_PI is defined if not already defined
+// Ensure M_PI maps to JUCE MathConstants
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#define M_PI juce::MathConstants<double>::pi
 #endif
 
 namespace audio_plugin {
@@ -98,14 +98,22 @@ void LFO::setEnabled(bool shouldEnable)
     enabled.store(shouldEnable);
 }
 
-void LFO::setSymmetry(float symmetryPercent)
+void LFO::setSymmetry(float symmetryValue)
 {
-    // Clamp symmetry to valid range and convert to 0.0-1.0 range
-    float clampedSymmetry = std::clamp(symmetryPercent, 10.0f, 90.0f) / 100.0f;
-    smoothedSymmetry.setTargetValue(clampedSymmetry);
+    // Accept either normalized [0.1..0.9] or percent [10..90]
+    float normalized = symmetryValue;
+    if (symmetryValue <= 1.0f) {
+        // Treat as normalized fraction
+        normalized = std::clamp(symmetryValue, 0.1f, 0.9f);
+    } else {
+        // Treat as percent
+        float clampedPercent = std::clamp(symmetryValue, 10.0f, 90.0f);
+        normalized = clampedPercent * 0.01f;
+    }
+    smoothedSymmetry.setTargetValue(normalized);
 }
 
-void LFO::setWaveShape(WaveformType waveshape)
+void LFO::setWaveShape(WaveShape waveshape)
 {
     waveShape.store(waveshape);
     
@@ -511,22 +519,22 @@ int LFO::getWaveTableSize() const
 
 juce::String LFO::getWaveShapeName() const
 {
-    WaveformType currentShape = waveShape.load();
+    WaveShape currentShape = waveShape.load();
     
     switch (currentShape) {
-        case WaveformType::Sine:
+        case WaveShape::Sine:
             return "Sine";
-        case WaveformType::RampDown:
+        case WaveShape::RampDown:
             return "Ramp Down";
-        case WaveformType::RampUp:
+        case WaveShape::RampUp:
             return "Ramp Up";
-        case WaveformType::Square:
+        case WaveShape::Square:
             return "Square";
-        case WaveformType::Triangle:
+        case WaveShape::Triangle:
             return "Triangle";
-        case WaveformType::HumpDown:
+        case WaveShape::HumpDown:
             return "Hump Down";
-        case WaveformType::HumpUp:
+        case WaveShape::HumpUp:
             return "Hump Up";
         default:
             return "Unknown";
@@ -543,28 +551,28 @@ void LFO::initializeWaveTable()
     }
     
     // Generate waveform based on selected waveshape
-    WaveformType currentShape = waveShape.load();
+    WaveShape currentShape = waveShape.load();
     
     switch (currentShape) {
-        case WaveformType::Sine:
+        case WaveShape::Sine:
             generateSineWave();
             break;
-        case WaveformType::RampDown:
+        case WaveShape::RampDown:
             generateRampDownWave();
             break;
-        case WaveformType::RampUp:
+        case WaveShape::RampUp:
             generateRampUpWave();
             break;
-        case WaveformType::Square:
+        case WaveShape::Square:
             generateSquareWave();
             break;
-        case WaveformType::Triangle:
+        case WaveShape::Triangle:
             generateTriangleWave();
             break;
-        case WaveformType::HumpDown:
+        case WaveShape::HumpDown:
             generateHumpDownWave();
             break;
-        case WaveformType::HumpUp:
+        case WaveShape::HumpUp:
             generateHumpUpWave();
             break;
         default:
@@ -879,7 +887,7 @@ void LFO::generateHumpUpWave()
 
 void LFO::updateParameters(float frequency, float depth, bool enabled,
                           bool invert, float phaseOffset, float symmetry, bool syncToHost,
-                          int syncRate, WaveformType waveshape)
+                          int syncRate, WaveShape waveshape)
 {
     // Store enabled state
     this->enabled.store(enabled);

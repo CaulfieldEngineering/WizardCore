@@ -4,9 +4,9 @@
 #include <atomic>
 #include <cmath>
 
-// Ensure M_PI is defined
+// Ensure M_PI maps to JUCE MathConstants
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#define M_PI juce::MathConstants<double>::pi
 #endif
 
 namespace audio_plugin {
@@ -37,7 +37,7 @@ public:
     /**
      * @brief Waveform types supported by the LFO
      */
-    enum class WaveformType {
+    enum class WaveShape {
         Sine = 0,      ///< Sine wave (default)
         RampDown,      ///< Ramp down waveform
         RampUp,        ///< Ramp up waveform  
@@ -132,7 +132,7 @@ public:
      * - >50%: First half expanded, second half compressed
      * Safe to call from any thread.
      */
-    void setSymmetry(float symmetryPercent);
+    void setSymmetry(float symmetryValue);
 
     /**
      * @brief Set the waveshape type
@@ -142,7 +142,7 @@ public:
      * to match the selected waveshape while maintaining current symmetry settings.
      * Safe to call from any thread.
      */
-    void setWaveShape(WaveformType waveshape);
+    void setWaveShape(WaveShape waveshape);
 
     /**
      * @brief Set host sync mode
@@ -225,7 +225,7 @@ public:
      */
     void updateParameters(float frequency, float depth, bool enabled,
                         bool invert, float phaseOffset, float symmetry, bool syncToHost,
-                        int syncRate, WaveformType waveshape);
+                        int syncRate, WaveShape waveshape);
 
     /**
      * @brief Update host information and automatically handle playhead updates
@@ -277,7 +277,7 @@ public:
     double getFrequency() const { return frequency.load(); }
     float getDepth() const { return smoothedDepth.getCurrentValue(); }
     double getPhaseOffset() const { return phaseOffset.load(); }
-    WaveformType getWaveformType() const { return waveShape.load(); }
+    WaveShape getWaveShape() const { return waveShape.load(); }
     bool isPrepared() const { return prepared.load(); }
     bool getInvert() const { return invert.load(); }
     float getSymmetry() const { return smoothedSymmetry.getCurrentValue(); }
@@ -325,7 +325,7 @@ private:
     std::atomic<double> sampleRate{44100.0};
     std::atomic<bool> prepared{false};
     std::atomic<bool> invert{false}; // Added for waveform inversion
-    std::atomic<WaveformType> waveShape{WaveformType::Sine}; // Current waveshape
+    std::atomic<WaveShape> waveShape{WaveShape::Sine}; // Current waveshape
     std::atomic<CouplingType> coupling{CouplingType::DC}; // Output coupling type (set once at init)
     
     // Host sync parameters
@@ -352,7 +352,7 @@ private:
     std::atomic<float> lastSymmetry{-1.0f};
     std::atomic<bool> lastSyncToHost{false};
     std::atomic<int> lastSyncRate{-1};
-    std::atomic<WaveformType> lastWaveshape{WaveformType::Sine};
+    std::atomic<WaveShape> lastWaveshape{WaveShape::Sine};
     std::atomic<bool> firstRun{true};
     
     // Enabled state
@@ -366,7 +366,7 @@ private:
     // Constants
     static constexpr double MIN_FREQUENCY = 0.001;   // Much lower minimum for very slow LFOs (like half notes)
     static constexpr double MAX_FREQUENCY = 1000.0;    // Higher maximum for flexibility
-    static constexpr double TWO_PI = 2.0 * M_PI;
+    static constexpr double TWO_PI = juce::MathConstants<double>::twoPi;
     static constexpr int DEFAULT_WAVETABLE_SIZE = 1024;  // Fixed size for predictability
     static constexpr float EPSILON = 1e-7f;         // Small value for comparisons
     

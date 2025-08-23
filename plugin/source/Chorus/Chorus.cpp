@@ -110,7 +110,7 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
             voice.lfos[lfoIndex].prepare(sampleRateIn);
             
             // Set LFO to sine wave with typical chorus settings
-            voice.lfos[lfoIndex].setWaveShape(LFO::WaveformType::Sine);
+            voice.lfos[lfoIndex].setWaveShape(LFO::WaveShape::Sine);
             voice.lfos[lfoIndex].setInvert(false);
             voice.lfos[lfoIndex].setSymmetry(0.5f);  // 50% = symmetric
             voice.lfos[lfoIndex].setSyncToHost(false);
@@ -628,7 +628,7 @@ void Chorus::syncRightLFOsToLeft() {
         voice.lfos[1].setDepth(voice.lfos[0].getDepth());
         voice.lfos[1].setPhaseOffset(voice.lfos[0].getPhaseOffset());
         voice.lfos[1].setSymmetry(voice.lfos[0].getSymmetry());
-        voice.lfos[1].setWaveShape(voice.lfos[0].getWaveformType());
+        voice.lfos[1].setWaveShape(voice.lfos[0].getWaveShape());
         voice.lfos[1].setInvert(voice.lfos[0].getInvert());
         voice.lfos[1].setSyncToHost(voice.lfos[0].getSyncToHost());
         voice.lfos[1].setSyncRate(voice.lfos[0].getSyncRate());
