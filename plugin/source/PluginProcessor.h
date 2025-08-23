@@ -109,6 +109,31 @@ private:
 	
 	// Simple flag to track delay type changes
 	std::atomic<bool> delayTypeChanged{false};
+	
+	// Parameter change flags for all chorus parameters
+	std::atomic<bool> chorusRateChanged{false};
+	std::atomic<bool> chorusDepthChanged{false};
+	std::atomic<bool> chorusMixChanged{false};
+	std::atomic<bool> chorusBaseDelayChanged{false};
+	std::atomic<bool> chorusVoiceCountChanged{false};
+	std::atomic<bool> chorusEnabledChanged{false};
+	
+	// Stereo Chorus parameter change flags
+	std::atomic<bool> chorusStereoModeChanged{false};
+	std::atomic<bool> chorusStereoSpreadChanged{false};
+	
+	// Mid-Side Chorus parameter change flags
+	std::atomic<bool> chorusMidEnabledChanged{false};
+	std::atomic<bool> chorusSideEnabledChanged{false};
+	std::atomic<bool> chorusSideGainChanged{false};
+	
+	// LPF parameter change flags
+	std::atomic<bool> chorusLPFEnabledChanged{false};
+	std::atomic<bool> chorusLPFCutoffChanged{false};
+	
+	// HPF parameter change flags
+	std::atomic<bool> chorusHPFEnabledChanged{false};
+	std::atomic<bool> chorusHPFCutoffChanged{false};
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)

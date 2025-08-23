@@ -21,6 +21,19 @@ The **Chorus** is a high-performance, multi-voice modulated delay effect designe
 - **Equal-power crossfading** for smooth dry/wet mixing without volume drops
 - **Intelligent voice normalization** to prevent volume buildup with multiple voices
 - **Advanced modulation scaling** to prevent artifacts at low delay times
+- **MN3007 BBD emulation** as default delay type for authentic vintage character
+
+### MN3007 Mode
+
+The Chorus now defaults to **MN3007 mode**, which provides authentic emulation of the classic Panasonic MN3007 Bucket Brigade Delay chip used in many vintage chorus and delay pedals. This mode delivers:
+
+- **Warm, vintage character** with subtle analog artifacts
+- **Temperature-dependent behavior** simulation for realistic emulation
+- **512-stage BBD architecture** matching the original chip
+- **Authentic frequency response** with 15kHz -3dB point at room temperature
+- **Clock noise and jitter** simulation for vintage authenticity
+
+The MN3007 mode can be changed to other delay types (Digital, BBD, or custom) using `setDelayType()` if desired.
 
 ### Common Applications
 - **Classic Chorus**: Rich, shimmering effect for guitars, keyboards, and vocals

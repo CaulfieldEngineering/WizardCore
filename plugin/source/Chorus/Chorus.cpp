@@ -2,6 +2,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include "../DelayLine/DelayLine.h"
+#include "../DelayLine/BBDelayLine/BBDelayLine.h"
 
 namespace audio_plugin {
 
@@ -39,14 +40,23 @@ Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX
         voices[i].lfos[1].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
         voices[i].lfos[1].setEnabled(voices[i].enabled.load());
         
-        // Initialize delay lines with default type (BBDelay - matches currentDelayType default)
+        // Initialize delay lines with default type (BBDelay - good vintage settings baked in)
         // Note: currentDelayType member variable isn't fully initialized yet during construction,
         // so we hardcode the initial type to match the default
         voices[i].delayLines[0] = DelayLine::createBBD();
         voices[i].delayLines[1] = DelayLine::createBBD();
         
+        // Configure BBD-specific parameters for authentic vintage chorus sound
+        // Cast to BBDelayLine to access BBD-specific methods
+        if (auto bbDelay0 = dynamic_cast<BBDelayLine*>(voices[i].delayLines[0].get())) {
+            configureBBDelayLine(bbDelay0, voices[i].baseDelay.load());
+        }
+        if (auto bbDelay1 = dynamic_cast<BBDelayLine*>(voices[i].delayLines[1].get())) {
+            configureBBDelayLine(bbDelay1, voices[i].baseDelay.load());
+        }
+        
         // Debug output for initial delay line creation
-        DBG("Chorus: Voice " << i << " initialized with BBDelay (hardcoded during construction)");
+        DBG("Chorus: Voice " << i << " initialized with BBDelay (MN3007-like vintage settings)");
     }
     
     // Initialize stereo configuration with default values
@@ -120,7 +130,15 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
             voice.delayLines[channel] = DelayLine::create(currentDelayType.load());
             
             voice.delayLines[channel]->prepare(sampleRateIn, maxDelayTime, 1);  // Mono delay line per channel
-            voice.delayLines[channel]->setDelayTime(voice.currentDelayTime);
+            // === FIX: Don't set delay time here - configureBBDelayLine will do it ===
+            // voice.delayLines[channel]->setDelayTime(voice.currentDelayTime);
+            
+            // Configure BBD-specific parameters if this is a BBDelayLine
+            if (currentDelayType.load() == DelayType::BBDelay) {
+                if (auto bbDelay = dynamic_cast<BBDelayLine*>(voice.delayLines[channel].get())) {
+                    configureBBDelayLine(bbDelay, voice.baseDelay.load());
+                }
+            }
             
             // Set longer smoothing time for low base delays to prevent warbling
             double smoothingTime = voice.baseDelay.load() < 45.0f ? 0.1 : 0.05; // 100ms vs 50ms
@@ -330,7 +348,7 @@ void Chorus::processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuff
             float modulatedDelay = voice.baseDelay.load() * 0.001f + lfoValue * modulationRange;
             
             // Clamp delay time to valid range
-            modulatedDelay = std::max(0.001f, std::min(modulatedDelay, 0.1f)); // 1ms to 100ms
+            modulatedDelay = std::clamp(modulatedDelay, MIN_DELAY_MS * 0.001f, MAX_DELAY_MS * 0.001f);
             
             // Get input samples for both channels
             const float* channelData[2] = { buffer.getReadPointer(0), buffer.getReadPointer(numChannels > 1 ? 1 : 0) };
@@ -338,8 +356,9 @@ void Chorus::processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuff
             
             // Process each channel with identical settings
             for (int channel = 0; channel < 2; ++channel) {
-                            voice.delayLines[channel]->setDelayTime(modulatedDelay);
-            float delayedSample = voice.delayLines[channel]->processSample(0, channelData[channel][sample]);
+                // Set the modulated delay time for this sample
+                voice.delayLines[channel]->setDelayTime(modulatedDelay);
+                float delayedSample = voice.delayLines[channel]->processSample(0, channelData[channel][sample]);
                 wetData[channel][sample] += delayedSample * voice.mix.load();
             }
         }
@@ -392,20 +411,19 @@ void Chorus::processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBu
                     modulationRange *= scaleFactor;
                 }
                 
-                // Calculate delay time for this channel
-                float baseDelaySec = baseDelayMs * 0.001f;
+                // Calculate modulation offset (but don't change the base delay)
                 float modulation = lfoValues[channel] * modulationRange;
                 
                 // Apply non-linear modulation scaling for smoother pitch variations
                 modulation = std::copysign(std::pow(std::abs(modulation), 1.2f), modulation);
                 
-                float channelDelay = baseDelaySec + modulation;
+                // Calculate final delay time with modulation
+                float finalDelayTime = baseDelayMs * 0.001f + modulation;
+                finalDelayTime = std::clamp(finalDelayTime, MIN_DELAY_MS * 0.001f, MAX_DELAY_MS * 0.001f);
                 
-                // Clamp delay time to valid range
-                channelDelay = std::max(0.001f, std::min(channelDelay, 0.1f)); // 1ms to 100ms
+                // Set the modulated delay time for this sample
+                voice.delayLines[channel]->setDelayTime(finalDelayTime);
                 
-                // Update delay time and process sample
-                voice.delayLines[channel]->setDelayTime(channelDelay);
                 float delayedSample = voice.delayLines[channel]->processSample(0, channelData[channel][sample]);
                 
                 // Add to wet buffer
@@ -486,11 +504,11 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
                 float midDelay = baseDelaySec + modulation;
                 
                 // Clamp delay time to valid range
-                midDelay = std::max(0.001f, std::min(midDelay, 0.1f)); // 1ms to 100ms
+                midDelay = std::clamp(midDelay, MIN_DELAY_MS * 0.001f, MAX_DELAY_MS * 0.001f);
                 
                 // Update delay time and process sample
-                            voice.delayLines[0]->setDelayTime(midDelay);
-            float delayedSample = voice.delayLines[0]->processSample(0, midSideData[0][sample]);
+                voice.delayLines[0]->setDelayTime(midDelay);
+                float delayedSample = voice.delayLines[0]->processSample(0, midSideData[0][sample]);
                 
                 // Add to wet buffer
                 midSideWetData[0][sample] += delayedSample * voice.mix.load();
@@ -509,11 +527,11 @@ void Chorus::processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioB
                 float sideDelay = baseDelaySec + modulation;
                 
                 // Clamp delay time to valid range
-                sideDelay = std::max(0.001f, std::min(sideDelay, 0.1f)); // 1ms to 100ms
+                sideDelay = std::clamp(sideDelay, MIN_DELAY_MS * 0.001f, MAX_DELAY_MS * 0.001f);
                 
                 // Update delay time and process sample
-                            voice.delayLines[1]->setDelayTime(sideDelay);
-            float delayedSample = voice.delayLines[1]->processSample(0, midSideData[1][sample]);
+                voice.delayLines[1]->setDelayTime(sideDelay);
+                float delayedSample = voice.delayLines[1]->processSample(0, midSideData[1][sample]);
                 
                 // Add to wet buffer with configurable side gain
                 // Convert dB to linear gain: gain = 10^(dB/20)
@@ -670,26 +688,7 @@ void Chorus::updateParameters(float rate, float depth, float mix, float baseDela
     setHPFCutoff(hpfCutoff);
 }
 
-void Chorus::setNumVoices(int numVoices) {
-    if (numVoices < 1 || numVoices > maxVoices) {
-        DBG("Chorus: Invalid number of voices: " << numVoices << " (must be 1-" << maxVoices << ")");
-        return;
-    }
-    
-    // Enable the first numVoices voices, disable the rest
-    for (int i = 0; i < maxVoices; ++i) {
-        bool voiceEnabled = (i < numVoices);
-        voices[i].enabled = voiceEnabled;
-        
-        // Also update the LFO enabled state to match the voice enabled state
-        voices[i].lfos[0].setEnabled(voiceEnabled);
-        voices[i].lfos[1].setEnabled(voiceEnabled);
-    }
-    
-    numActiveVoices = numVoices;
-    
-    //DBG("Chorus: Number of voices set to " << numVoices);
-}
+
 
 void Chorus::setEnabled(bool enabledIn) {
     enabled = enabledIn;
@@ -755,6 +754,12 @@ void Chorus::setSideGain(float gainDb) {
 }
 
 void Chorus::setRate(float rate) {
+    // Validate rate against constants
+    if (rate < MIN_RATE || rate > MAX_RATE) {
+        DBG("Chorus: Rate out of range: " << rate << " (must be " << MIN_RATE << "-" << MAX_RATE << ")");
+        return;
+    }
+    
     // Update LFO frequency for all active voices
     if (prepared.load()) {
         int currentVoiceCount = numActiveVoices.load();
@@ -766,6 +771,12 @@ void Chorus::setRate(float rate) {
 }
 
 void Chorus::setDepth(float depth) {
+    // Validate depth against constants
+    if (depth < MIN_DEPTH || depth > MAX_DEPTH) {
+        DBG("Chorus: Depth out of range: " << depth << " (must be " << MIN_DEPTH << "-" << MAX_DEPTH << ")");
+        return;
+    }
+    
     // Update LFO depth for all active voices
     if (prepared.load()) {
         int currentVoiceCount = numActiveVoices.load();
@@ -808,6 +819,7 @@ void Chorus::setBaseDelay(float delayMs) {
         if (prepared.load()) {
             voices[i].currentDelayTime = delayMs * 0.001f;
             for (int channel = 0; channel < 2; ++channel) {
+                // Update the delay time for real-time parameter changes
                 voices[i].delayLines[channel]->setDelayTime(voices[i].currentDelayTime);
             }
         }
@@ -836,6 +848,11 @@ void Chorus::setVoiceCount(int numVoices) {
 }
 
 void Chorus::setStereoMode(int stereoMode) {
+    if (stereoMode < 0 || stereoMode > 2) {
+        DBG("Chorus: Invalid stereo mode: " << stereoMode << " (must be 0-2)");
+        return;
+    }
+    
     if (stereoMode == 0) currentStereoMode = StereoMode::Mono;
     else if (stereoMode == 1) currentStereoMode = StereoMode::Stereo;
     else if (stereoMode == 2) currentStereoMode = StereoMode::MidSide;
@@ -873,6 +890,7 @@ void Chorus::setVoiceBaseDelay(int voiceIndex, float delayMs) {
     if (prepared.load()) {
         voices[voiceIndex].currentDelayTime = delayMs * 0.001f;
         for (int channel = 0; channel < 2; ++channel) {
+            // Update the delay time for real-time parameter changes
             voices[voiceIndex].delayLines[channel]->setDelayTime(voices[voiceIndex].currentDelayTime);
         }
     }
@@ -1001,7 +1019,12 @@ void Chorus::setDelayType(DelayType delayType)
     // Debug output
     static DelayType lastDelayType = DelayType::BBDelay;
     if (delayType != lastDelayType) {
-        DBG("Chorus: setDelayType called with: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade"));
+        const char* typeName = "Unknown";
+        switch (delayType) {
+            case DelayType::DigitalDelay: typeName = "Digital"; break;
+            case DelayType::BBDelay: typeName = "Bucket Brigade"; break;
+        }
+        DBG("Chorus: setDelayType called with: " << typeName);
         lastDelayType = delayType;
     }
     
@@ -1010,7 +1033,12 @@ void Chorus::setDelayType(DelayType delayType)
     // If already prepared, recreate delay lines with new type
     if (prepared.load())
     {
-        DBG("Chorus: Recreating delay lines for type: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade"));
+        const char* typeName = "Unknown";
+        switch (delayType) {
+            case DelayType::DigitalDelay: typeName = "Digital"; break;
+            case DelayType::BBDelay: typeName = "Bucket Brigade"; break;
+        }
+        DBG("Chorus: Recreating delay lines for type: " << typeName);
         
         for (int i = 0; i < maxVoices; ++i)
         {
@@ -1032,14 +1060,44 @@ void Chorus::setDelayType(DelayType delayType)
                 double maxDelayTime = (voices[i].baseDelay.load() + MAX_DELAY_MS) * 0.001;
                 voices[i].delayLines[ch]->prepare(sampleRate.load(), maxDelayTime, 1);
                 
-                // Set delay time - chorus is guaranteed to be prepared when called from processBlock
+                // Configure BBD-specific parameters if this is a BBDelayLine
+                if (delayType == DelayType::BBDelay) {
+                    if (auto bbDelay = dynamic_cast<BBDelayLine*>(voices[i].delayLines[ch].get())) {
+                        configureBBDelayLine(bbDelay, voices[i].baseDelay.load());
+                    }
+                }
+                
+                // Set delay time after recreating delay line
                 voices[i].delayLines[ch]->setDelayTime(currentDelay);
-                DBG("Chorus: Voice " << i << " channel " << ch << " delay line prepared and set to " << (currentDelay * 1000.0) << "ms");
+                //DBG("Chorus: Voice " << i << " channel " << ch << " delay line prepared and set to " << (currentDelay * 1000.0) << "ms");
             }
         }
     } else {
         DBG("Chorus: setDelayType called but chorus not prepared yet - delay type will be applied when prepare() is called");
         // The prepare() method will use currentDelayType.load() to create the correct delay lines
+    }
+}
+
+// BBD configuration helper method
+void Chorus::configureBBDelayLine(BBDelayLine* bbDelay, float baseDelayMs) {
+    // === DEBUG: Log BBD configuration values ===
+    // DBG("Chorus configureBBDelayLine - baseDelayMs: " << baseDelayMs << " ms");
+    
+    // Configure BBD parameters using our actual implementation
+    bbDelay->setStageCount(256);         // Reduced stage count for chorus-range delays and CPU efficiency
+    bbDelay->setDroopFactor(0.9995f);    // Near-unity per-stage droop; ~0.60 total over 1024-equivalent shifts
+    bbDelay->setFilteringEnabled(true);  // Enable anti-aliasing filters
+    
+    // Only set delay time if the BBDelayLine is prepared
+    if (bbDelay->isPrepared()) {
+        // === DEBUG: Log the delay time being set ===
+        // float delayTimeSeconds = baseDelayMs * 0.001f;
+        // DBG("Chorus configureBBDelayLine - setting delay time: " << delayTimeSeconds << " seconds");
+        bbDelay->setDelayTime(baseDelayMs * 0.001);
+
+        // smoothing (slower for short base delays to avoid warble)
+        const double smoothingTime = (baseDelayMs < 45.0f) ? 0.10 : 0.05;
+        bbDelay->setSmoothingTime(smoothingTime);
     }
 }
 

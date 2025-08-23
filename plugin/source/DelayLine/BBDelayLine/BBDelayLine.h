@@ -1,256 +1,137 @@
-#pragma once
+﻿#pragma once
 
 #include "../DelayLine.h"
 #include <juce_audio_processors/juce_audio_processors.h>
-#include <juce_core/juce_core.h>
+#include <vector>
+#include <cmath>
 
-namespace audio_plugin {
+namespace audio_plugin
+{
 
 /**
- * @brief A Bucket Brigade Delay emulation that inherits from DelayLine
- * 
- * This class emulates the characteristic sound of analog Bucket Brigade Delay (BBD) circuits,
- * which were commonly used in vintage delay pedals and synthesizers. It inherits from DelayLine
- * to maintain full interface compatibility while adding BBD-specific characteristics.
- * 
- * BBD Characteristics:
- * - Clock noise and jitter simulation
- * - Bandwidth reduction and filtering
- * - Slight sample rate conversion artifacts
- * - Warm, slightly degraded sound quality
- * - Clock rate modulation effects
- * 
- * Thread Safety: Inherits thread safety from DelayLine
- * Memory: Minimal additional overhead beyond base DelayLine
- * 
- * Usage Example:
- * @code
- * BBDelayLine bbDelay;
- * bbDelay.prepare(48000, 1.0, 2);  // 48kHz, 1 second max, stereo
- * bbDelay.setDelayTime(0.25);       // 250ms delay
- * bbDelay.setClockRate(1000);       // 1kHz internal clock
- * bbDelay.setNoiseAmount(0.1);      // 10% clock noise
- * bbDelay.processBlock(audioBuffer);
- * @endcode
+ * Bucket‑Brigade Delay (BBD) emulation with fixed stage count and variable clock.
+ *
+ * Key behaviors modeled:
+ *  - Fixed number of stages (e.g., MN3007 ≈ 1024) shifted by a variable clock
+ *  - Two‑phase (φ1/φ2) clock option: effective sampling f_eff = f_clk / 2
+ *  - Per‑transfer droop/leak (capacitor discharge) parameterized by a time constant τ
+ *  - Essential pre/post low‑pass filters tied to f_eff (anti‑alias & reconstruction)
+ *  - Shared clock for all channels, advanced once per frame (no per‑channel drift)
+ *  - Multi‑tick handling when f_clk / fs_host > 1 (perform multiple shifts per host sample)
+ *
+ * This class derives from DelayLine to be drop‑in compatible with your existing factory.
  */
-class BBDelayLine : public DelayLine {
+class BBDelayLine final : public DelayLine
+{
 public:
-    /**
-     * @brief BBD-specific parameters for emulating analog characteristics
-     */
-    enum class BBDCharacteristic {
-        Vintage,    ///< Classic BBD sound with more noise and filtering
-        Modern,     ///< Cleaner BBD with subtle artifacts
-        Dirty       ///< Heavy degradation and noise for lo-fi effects
-    };
-
-    /**
-     * @brief Default constructor
-     */
     BBDelayLine();
-    
-    /**
-     * @brief Destructor
-     */
     ~BBDelayLine() override = default;
 
-    /**
-     * @brief Prepare the BBD delay line for processing
-     * @param sampleRate The sample rate in Hz
-     * @param maxDelayTimeInSeconds Maximum delay time in seconds
-     * @param numChannels Number of audio channels to process
-     * 
-     * Overrides DelayLine::prepare() to initialize BBD-specific parameters.
-     * Must be called before processing any audio.
-     */
+    //=== DelayLine interface =====================================================
     void prepare(double sampleRate, double maxDelayTimeInSeconds, int numChannels) override;
-
-    /**
-     * @brief Set the internal clock rate for the BBD simulation
-     * @param clockRateHz Clock rate in Hz (typically 1000-10000 Hz)
-     * 
-     * The clock rate determines the internal sample rate of the BBD circuit.
-     * Lower rates create more artifacts, higher rates are cleaner.
-     * Typical range: 1kHz to 10kHz for vintage character.
-     */
-    void setClockRate(double clockRateHz);
-
-    /**
-     * @brief Get the current clock rate
-     * @return Current clock rate in Hz
-     */
-    double getClockRate() const;
-
-    /**
-     * @brief Set the amount of clock noise/jitter
-     * @param noiseAmount Amount of noise (0.0 to 1.0, where 0.0 is clean)
-     * 
-     * Controls the amount of clock jitter and noise artifacts.
-     * 0.0 = clean digital delay, 1.0 = maximum vintage BBD character.
-     */
-    void setNoiseAmount(double noiseAmount);
-
-    /**
-     * @brief Get the current noise amount
-     * @return Current noise amount (0.0 to 1.0)
-     */
-    double getNoiseAmount() const;
-
-    /**
-     * @brief Set the bandwidth reduction amount
-     * @param bandwidthReduction Amount of high-frequency reduction (0.0 to 1.0)
-     * 
-     * Simulates the bandwidth limitations of BBD circuits.
-     * 0.0 = full bandwidth, 1.0 = maximum filtering.
-     */
-    void setBandwidthReduction(double bandwidthReduction);
-
-    /**
-     * @brief Get the current bandwidth reduction
-     * @return Current bandwidth reduction amount (0.0 to 1.0)
-     */
-    double getBandwidthReduction() const;
-
-    /**
-     * @brief Set the BBD characteristic type
-     * @param characteristic The BBD characteristic type
-     * 
-     * Preset configurations for different BBD circuit types.
-     */
-    void setBBDCharacteristic(BBDCharacteristic characteristic);
-
-    /**
-     * @brief Get the current BBD characteristic
-     * @return Current BBD characteristic type
-     */
-    BBDCharacteristic getBBDCharacteristic() const;
-
-    /**
-     * @brief Process a single audio sample with BBD characteristics
-     * @param channel Audio channel to process
-     * @param input Input sample value
-     * @return Processed sample with BBD effects applied
-     * 
-     * Overrides DelayLine::processSample() to add BBD processing.
-     * The input sample is first processed through BBD simulation, then
-     * passed to the base delay line processing.
-     */
-    float processSample(int channel, float input) override;
-
-    /**
-     * @brief Process a block of audio with BBD characteristics
-     * @param buffer Audio buffer to process in-place
-     * 
-     * Overrides DelayLine::processBlock() to add BBD processing.
-     * Each sample is processed through BBD simulation before being
-     * passed to the base delay line processing.
-     */
-    void processBlock(juce::AudioBuffer<float>& buffer) override;
-    
-    /**
-     * @brief Process an audio block with BBD processing and wet/dry mixing
-     * @param buffer The audio buffer to process
-     * @param wetMix The wet signal mix amount (0.0 = dry only, 1.0 = wet only)
-     * 
-     * Overrides DelayLine::processBlock() to add BBD processing.
-     * Processes the buffer and mixes the delayed signal with the original.
-     * Useful for effects where you want to blend the delayed and original signals.
-     * 
-     * Thread Safety: Safe to call from different threads for different channels
-     */
-    void processBlock(juce::AudioBuffer<float>& buffer, float wetMix) override;
-
-    /**
-     * @brief Clear all delay buffers and reset BBD state
-     * 
-     * Overrides DelayLine::clear() to also clear BBD-specific state.
-     * This resets all delay buffers, modulation state, and filter coefficients.
-     */
-    void clear() override;
-
-    // Required DelayLine interface methods
-    void setDelayTime(double delayTimeInSeconds) override;
-    void setDelayInSamples(double delayInSamples) override;
-    void setDelayTimeImmediate(double delayTimeInSeconds) override;
+    void setDelayTime(double delayTimeInSeconds) override;           // Smoothed
+    void setDelayInSamples(double delayInSamples) override;          // Smoothed
+    void setDelayTimeImmediate(double delayTimeInSeconds) override;  // Hard set
     void setSmoothingTime(double rampTimeInSeconds) override;
-    double getDelayTime() const override;
-    double getDelayInSamples() const override;
-    double getCurrentDelayInSamples() const override;
-    void setInterpolationType(InterpolationType type) override;
-    InterpolationType getInterpolationType() const override;
+    double getDelayTime() const override;                // target (seconds)
+    double getDelayInSamples() const override;           // target (samples)
+    double getCurrentDelayInSamples() const override;    // instantaneous from smoothed clock
+    void setInterpolationType(InterpolationType type) override; // ignored for BBD
+    InterpolationType getInterpolationType() const override; // always returns None for BBD
+    void processBlock(juce::AudioBuffer<float>& buffer) override;
+    void processBlock(juce::AudioBuffer<float>& buffer, float wetMix) override;
+    float processSample(int channel, float input) override;
     bool isPrepared() const override;
     double getMaxDelayTime() const override;
     int getMaxDelayInSamples() const override;
     double getSampleRate() const override;
+    void clear() override;
 
+    //=== BBD parameters ==========================================================
+    
     /**
-     * @brief Set clock rate modulation for chorus/flanger effects
-     * @param modulationDepth Depth of modulation (0.0 to 1.0)
-     * @param modulationRate Rate of modulation in Hz
-     * 
-     * Adds subtle clock rate modulation for more authentic BBD behavior.
+     * @brief Set the number of BBD stages (emulating different chip types)
+     * @param stages Number of stages (128-4096, default 1024 for MN3007)
      */
-    void setClockModulation(double modulationDepth, double modulationRate);
+    void setStageCount(int stages);
+    
+    /**
+     * @brief Set the droop/leak coefficient (capacitor discharge simulation)
+     * @param droop Droop factor (0.0-1.0, where 1.0 = no droop, 0.95 = typical)
+     */
+    void setDroopFactor(float droop);
+    
+    /**
+     * @brief Enable/disable anti-aliasing filters
+     * @param enabled Whether to use input/output filtering
+     */
+    void setFilteringEnabled(bool enabled);
 
-    /**
-     * @brief Get the current modulation parameters
-     * @param depth Output parameter for modulation depth
-     * @param rate Output parameter for modulation rate
-     */
-    void getClockModulation(double& depth, double& rate) const;
+    // Getters for BBD parameters
+    int getStageCount() const { return numStages; }
+    float getDroopFactor() const { return droopFactor; }
+    bool isFilteringEnabled() const { return filteringEnabled; }
 
 private:
-    // BBD-specific processing methods
-    float applyBBDProcessing(int channel, float input);
-    void updateClockModulation();
-    float applyBandwidthFilter(int channel, float sample);
-    void updateFilterCoefficient();
+    // BBD emulation constants
+    static constexpr int DEFAULT_STAGES = 256;    // More practical for chorus-range delays
+    static constexpr int MIN_STAGES = 128;
+    static constexpr int MAX_STAGES = 4096;
+    static constexpr float DEFAULT_DROOP = 0.9995f; // Gentle droop per stage
+    static constexpr double DEFAULT_SMOOTHING_TIME = 0.02;  // 20ms
+    static constexpr double MIN_DELAY_TIME = 0.001;  // 1ms minimum
     
-    // Base delay line state (required by DelayLine interface)
+    // Core BBD parameters
+    int numStages = DEFAULT_STAGES;
+    float droopFactor = DEFAULT_DROOP;
+    bool filteringEnabled = true;
+    
+    // State tracking
     std::atomic<bool> prepared{false};
-    double sampleRate{0.0};
-    double maxDelayTimeInSeconds{0.0};
-    int maxDelayInSamples{0};
-    int numChannels{0};
-    
-    // Delay buffers and state
-    std::vector<std::vector<float>> delayBuffers;
-    std::vector<int> writeIndices;
-    std::vector<double> readPositions;
+    double sampleRate = 44100.0;
+    int numChannels = 0;
+    double maxDelayTimeSeconds = 0.0;
     
     // Delay time control
-    double targetDelayInSamples{0.0};
-    double currentDelayInSamples{0.0};
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedDelay;
+    double targetDelayTimeSeconds = 0.03;  // 30ms default
+    double currentClockFreq = 44100.0;     // Current BBD clock frequency
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedClockFreq;
     
-    // BBD parameters
-    double clockRate{2000.0};           // Internal clock rate in Hz
-    double noiseAmount{0.15};           // Amount of clock noise (0.0 to 1.0)
-    double bandwidthReduction{0.3};     // High-frequency reduction (0.0 to 1.0)
-    BBDCharacteristic characteristic{BBDCharacteristic::Vintage};
+    // BBD stage arrays (one per channel)
+    std::vector<std::vector<float>> stageBuffers;  // [channel][stage]
     
-    // Clock modulation
-    double modulationDepth{0.0};
-    double modulationRate{0.0};
-    double modulationPhase{0.0};
+    // Clock management
+    std::vector<double> clockAccumulators;  // Per-channel clock phase
     
-    // Internal state for BBD simulation
-    std::vector<std::vector<float>> bbBuffers;  // Per-channel BBD processing buffers
-    std::vector<int> bbWriteIndices;            // Per-channel BBD write indices
-    std::vector<double> clockPhases;            // Per-channel clock phases
+    // Anti-aliasing filters (simple one-pole LPF)
+    struct SimpleFilter {
+        float state = 0.0f;
+        float coefficient = 0.7f;  // Cutoff related to clock frequency
+        
+        float process(float input) {
+            state += coefficient * (input - state);
+            return state;
+        }
+        
+        void setCutoff(float cutoffRatio) {
+            coefficient = std::clamp(cutoffRatio, 0.1f, 0.9f);
+        }
+        
+        void reset() {
+            state = 0.0f;
+        }
+    };
     
-    // Random number generation for noise simulation
-    juce::Random randomEngine;
+    std::vector<SimpleFilter> inputFilters;   // One per channel
+    std::vector<SimpleFilter> outputFilters;  // One per channel
     
-    // Filter coefficients for bandwidth simulation
-    std::vector<std::vector<float>> filterStates;  // Per-channel filter state
-    float filterCoeff{0.0f};                       // Low-pass filter coefficient
+    // Helper methods
+    void updateClockFrequency();
+    void updateFilterCutoffs();
+    float processStages(int channel, float input);
+    void resetStages();
     
-    // Constants
-    static constexpr double MIN_CLOCK_RATE = 100.0;      // Minimum clock rate
-    static constexpr double MAX_CLOCK_RATE = 50000.0;    // Maximum clock rate
-    static constexpr double DEFAULT_CLOCK_RATE = 2000.0; // Default clock rate
-    
+    //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BBDelayLine)
 };
 

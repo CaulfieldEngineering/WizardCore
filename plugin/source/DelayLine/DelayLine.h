@@ -222,12 +222,7 @@ public:
      */
     static std::unique_ptr<DelayLine> createBBD();
     
-    /**
-     * @brief Create a BBD delay line with specified characteristics
-     * @param characteristic The BBD characteristic to use (0=Vintage, 1=Modern, 2=Dirty)
-     * @return Unique pointer to a BBDelayLine instance
-     */
-    static std::unique_ptr<DelayLine> createBBD(int characteristic);
+
 };
 
 } // namespace audio_plugin

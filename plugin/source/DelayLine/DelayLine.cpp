@@ -28,20 +28,7 @@ std::unique_ptr<DelayLine> DelayLine::createBBD()
     return std::make_unique<BBDelayLine>();
 }
 
-std::unique_ptr<DelayLine> DelayLine::createBBD(int characteristic)
-{
-    auto bbDelay = std::make_unique<BBDelayLine>();
-    // Convert integer to BBDCharacteristic enum
-    BBDelayLine::BBDCharacteristic bbChar;
-    switch (characteristic) {
-        case 0: bbChar = BBDelayLine::BBDCharacteristic::Vintage; break;
-        case 1: bbChar = BBDelayLine::BBDCharacteristic::Modern; break;
-        case 2: bbChar = BBDelayLine::BBDCharacteristic::Dirty; break;
-        default: bbChar = BBDelayLine::BBDCharacteristic::Vintage; break;
-    }
-    bbDelay->setBBDCharacteristic(bbChar);
-    return bbDelay;
-}
+
 
 } // namespace audio_plugin
 

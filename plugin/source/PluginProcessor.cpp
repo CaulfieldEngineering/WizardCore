@@ -273,10 +273,19 @@ namespace audio_plugin {
         chorus.prepare(sampleRate, getTotalNumInputChannels());
         
         // Initialize chorus with default parameters
-        chorus.setNumVoices(1);  // Start with 1 voice
+        chorus.setVoiceCount(1);  // Start with 1 voice
         chorus.setMix(0.5f);     // 50% wet/dry mix
         chorus.setBaseDelay(30.0f); // 30ms base delay
 		
+        // Set all parameter change flags to ensure initial update
+        delayTypeChanged.store(true);
+        chorusRateChanged.store(true);
+        chorusDepthChanged.store(true);
+        chorusMixChanged.store(true);
+        chorusBaseDelayChanged.store(true);
+        chorusVoiceCountChanged.store(true);
+        chorusEnabledChanged.store(true);
+
         DBG("Plugin prepared successfully with Multi-Voice Chorus and Test LFO");
     }
 
@@ -351,6 +360,9 @@ namespace audio_plugin {
                 delayTypeChanged.store(false);
             }
             
+            // Check and update other parameters only when they've changed
+            bool parametersUpdated = false;
+            
             // Get all current parameter values
             float rate = chorusRateParam ? static_cast<float>(*chorusRateParam) : 0.8f;
             float depth = chorusDepthParam ? static_cast<float>(*chorusDepthParam) : 0.5f;
@@ -375,11 +387,42 @@ namespace audio_plugin {
             bool hpfEnabled = chorusHPFEnabledParam ? (static_cast<float>(*chorusHPFEnabledParam) > 0.5f) : false;
             float hpfCutoff = chorusHPFCutoffParam ? static_cast<float>(*chorusHPFCutoffParam) : 20.0f;
             
-            // Update all chorus parameters in one call
-            chorus.updateParameters(rate, depth, mix, baseDelay, voiceCount,
-                                  stereoMode, stereoSpread,
-                                  midEnabled, sideEnabled, sideGain,
-                                  lpfEnabled, lpfCutoff, hpfEnabled, hpfCutoff);
+            // Update chorus parameters only when they've changed
+            if (chorusRateChanged.load() || chorusDepthChanged.load() || chorusMixChanged.load() || 
+                chorusBaseDelayChanged.load() || chorusVoiceCountChanged.load() || chorusEnabledChanged.load() ||
+                chorusStereoModeChanged.load() || chorusStereoSpreadChanged.load() || chorusMidEnabledChanged.load() || 
+                chorusSideEnabledChanged.load() || chorusSideGainChanged.load() || chorusLPFEnabledChanged.load() || 
+                chorusLPFCutoffChanged.load() || chorusHPFEnabledChanged.load() || chorusHPFCutoffChanged.load()) {
+                
+                // Update all chorus parameters in one call
+                chorus.updateParameters(rate, depth, mix, baseDelay, voiceCount,
+                                      stereoMode, stereoSpread,
+                                      midEnabled, sideEnabled, sideGain,
+                                      lpfEnabled, lpfCutoff, hpfEnabled, hpfCutoff);
+                
+                parametersUpdated = true;
+                
+                // Clear all parameter change flags
+                chorusRateChanged.store(false);
+                chorusDepthChanged.store(false);
+                chorusMixChanged.store(false);
+                chorusBaseDelayChanged.store(false);
+                chorusVoiceCountChanged.store(false);
+                chorusEnabledChanged.store(false);
+                chorusStereoModeChanged.store(false);
+                chorusStereoSpreadChanged.store(false);
+                chorusMidEnabledChanged.store(false);
+                chorusSideEnabledChanged.store(false);
+                chorusSideGainChanged.store(false);
+                chorusLPFEnabledChanged.store(false);
+                chorusLPFCutoffChanged.store(false);
+                chorusHPFEnabledChanged.store(false);
+                chorusHPFCutoffChanged.store(false);
+                
+                if (parametersUpdated) {
+                    DBG("PluginProcessor: Chorus parameters updated");
+                }
+            }
             
             // Process audio through the multi-voice chorus effect
             chorus.processBlock(buffer);
@@ -435,6 +478,68 @@ namespace audio_plugin {
                     delayTypeChanged.store(true);
                     DBG("PluginProcessor: Delay type change detected via tree type - flag set");
                 }
+                
+                // Handle all other chorus parameter changes
+                else if (paramID == "chorus_rate") {
+                    chorusRateChanged.store(true);
+                    DBG("PluginProcessor: Chorus rate change detected - flag set");
+                }
+                else if (paramID == "chorus_depth") {
+                    chorusDepthChanged.store(true);
+                    DBG("PluginProcessor: Chorus depth change detected - flag set");
+                }
+                else if (paramID == "chorus_mix") {
+                    chorusMixChanged.store(true);
+                    DBG("PluginProcessor: Chorus mix change detected - flag set");
+                }
+                else if (paramID == "chorus_base_delay") {
+                    chorusBaseDelayChanged.store(true);
+                    DBG("PluginProcessor: Chorus base delay change detected - flag set");
+                }
+                else if (paramID == "chorus_voice_count") {
+                    chorusVoiceCountChanged.store(true);
+                    DBG("PluginProcessor: Chorus voice count change detected - flag set");
+                }
+                else if (paramID == "chorus_enabled") {
+                    chorusEnabledChanged.store(true);
+                    DBG("PluginProcessor: Chorus enabled change detected - flag set");
+                }
+                else if (paramID == "chorus_stereo_mode") {
+                    chorusStereoModeChanged.store(true);
+                    DBG("PluginProcessor: Chorus stereo mode change detected - flag set");
+                }
+                else if (paramID == "chorus_stereo_spread") {
+                    chorusStereoSpreadChanged.store(true);
+                    DBG("PluginProcessor: Chorus stereo spread change detected - flag set");
+                }
+                else if (paramID == "chorus_mid_enabled") {
+                    chorusMidEnabledChanged.store(true);
+                    DBG("PluginProcessor: Chorus mid enabled change detected - flag set");
+                }
+                else if (paramID == "chorus_side_enabled") {
+                    chorusSideEnabledChanged.store(true);
+                    DBG("PluginProcessor: Chorus side enabled change detected - flag set");
+                }
+                else if (paramID == "chorus_side_gain") {
+                    chorusSideGainChanged.store(true);
+                    DBG("PluginProcessor: Chorus side gain change detected - flag set");
+                }
+                else if (paramID == "chorus_lpf_enabled") {
+                    chorusLPFEnabledChanged.store(true);
+                    DBG("PluginProcessor: Chorus LPF enabled change detected - flag set");
+                }
+                else if (paramID == "chorus_lpf_cutoff") {
+                    chorusLPFCutoffChanged.store(true);
+                    DBG("PluginProcessor: Chorus LPF cutoff change detected - flag set");
+                }
+                else if (paramID == "chorus_hpf_enabled") {
+                    chorusHPFEnabledChanged.store(true);
+                    DBG("PluginProcessor: Chorus HPF enabled change detected - flag set");
+                }
+                else if (paramID == "chorus_hpf_cutoff") {
+                    chorusHPFCutoffChanged.store(true);
+                    DBG("PluginProcessor: Chorus HPF cutoff change detected - flag set");
+                }
             }
         }
         
@@ -447,6 +552,174 @@ namespace audio_plugin {
                 lastDelayTypeValue = currentDelayTypeValue;
                 delayTypeChanged.store(true);
                 DBG("PluginProcessor: Delay type change detected via fallback - flag set");
+            }
+        }
+        
+        // Fallback parameter change detection for all other chorus parameters
+        // This ensures we don't miss parameter changes even if the tree structure is unexpected
+        
+        // Rate parameter fallback
+        if (chorusRateParam) {
+            static float lastRateValue = -1.0f;
+            float currentRateValue = *chorusRateParam;
+            if (currentRateValue != lastRateValue) {
+                lastRateValue = currentRateValue;
+                chorusRateChanged.store(true);
+                DBG("PluginProcessor: Chorus rate change detected via fallback - flag set");
+            }
+        }
+        
+        // Depth parameter fallback
+        if (chorusDepthParam) {
+            static float lastDepthValue = -1.0f;
+            float currentDepthValue = *chorusDepthParam;
+            if (currentDepthValue != lastDepthValue) {
+                lastDepthValue = currentDepthValue;
+                chorusDepthChanged.store(true);
+                DBG("PluginProcessor: Chorus depth change detected via fallback - flag set");
+            }
+        }
+        
+        // Mix parameter fallback
+        if (chorusMixParam) {
+            static float lastMixValue = -1.0f;
+            float currentMixValue = *chorusMixParam;
+            if (currentMixValue != lastMixValue) {
+                lastMixValue = currentMixValue;
+                chorusMixChanged.store(true);
+                DBG("PluginProcessor: Chorus mix change detected via fallback - flag set");
+            }
+        }
+        
+        // Base delay parameter fallback
+        if (chorusBaseDelayParam) {
+            static float lastBaseDelayValue = -1.0f;
+            float currentBaseDelayValue = *chorusBaseDelayParam;
+            if (currentBaseDelayValue != lastBaseDelayValue) {
+                lastBaseDelayValue = currentBaseDelayValue;
+                chorusBaseDelayChanged.store(true);
+                DBG("PluginProcessor: Chorus base delay change detected via fallback - flag set");
+            }
+        }
+        
+        // Voice count parameter fallback
+        if (chorusVoiceCountParam) {
+            static float lastVoiceCountValue = -1.0f;
+            float currentVoiceCountValue = *chorusVoiceCountParam;
+            if (currentVoiceCountValue != lastVoiceCountValue) {
+                lastVoiceCountValue = currentVoiceCountValue;
+                chorusVoiceCountChanged.store(true);
+                DBG("PluginProcessor: Chorus voice count change detected via fallback - flag set");
+            }
+        }
+        
+        // Enabled parameter fallback
+        if (chorusEnabledParam) {
+            static float lastEnabledValue = -1.0f;
+            float currentEnabledValue = *chorusEnabledParam;
+            if (currentEnabledValue != lastEnabledValue) {
+                lastEnabledValue = currentEnabledValue;
+                chorusEnabledChanged.store(true);
+                DBG("PluginProcessor: Chorus enabled change detected via fallback - flag set");
+            }
+        }
+        
+        // Stereo mode parameter fallback
+        if (chorusStereoModeParam) {
+            static float lastStereoModeValue = -1.0f;
+            float currentStereoModeValue = *chorusStereoModeParam;
+            if (currentStereoModeValue != lastStereoModeValue) {
+                lastStereoModeValue = currentStereoModeValue;
+                chorusStereoModeChanged.store(true);
+                DBG("PluginProcessor: Chorus stereo mode change detected via fallback - flag set");
+            }
+        }
+        
+        // Stereo spread parameter fallback
+        if (chorusStereoSpreadParam) {
+            static float lastStereoSpreadValue = -1.0f;
+            float currentStereoSpreadValue = *chorusStereoSpreadParam;
+            if (currentStereoSpreadValue != lastStereoSpreadValue) {
+                lastStereoSpreadValue = currentStereoSpreadValue;
+                chorusStereoSpreadChanged.store(true);
+                DBG("PluginProcessor: Chorus stereo spread change detected via fallback - flag set");
+            }
+        }
+        
+        // Mid enabled parameter fallback
+        if (chorusMidEnabledParam) {
+            static float lastMidEnabledValue = -1.0f;
+            float currentMidEnabledValue = *chorusMidEnabledParam;
+            if (currentMidEnabledValue != lastMidEnabledValue) {
+                lastMidEnabledValue = currentMidEnabledValue;
+                chorusMidEnabledChanged.store(true);
+                DBG("PluginProcessor: Chorus mid enabled change detected via fallback - flag set");
+            }
+        }
+        
+        // Side enabled parameter fallback
+        if (chorusSideEnabledParam) {
+            static float lastSideEnabledValue = -1.0f;
+            float currentSideEnabledValue = *chorusSideEnabledParam;
+            if (currentSideEnabledValue != lastSideEnabledValue) {
+                lastSideEnabledValue = currentSideEnabledValue;
+                chorusSideEnabledChanged.store(true);
+                DBG("PluginProcessor: Chorus side enabled change detected via fallback - flag set");
+            }
+        }
+        
+        // Side gain parameter fallback
+        if (chorusSideGainParam) {
+            static float lastSideGainValue = -1.0f;
+            float currentSideGainValue = *chorusSideGainParam;
+            if (currentSideGainValue != lastSideGainValue) {
+                lastSideGainValue = currentSideGainValue;
+                chorusSideGainChanged.store(true);
+                DBG("PluginProcessor: Chorus side gain change detected via fallback - flag set");
+            }
+        }
+        
+        // LPF enabled parameter fallback
+        if (chorusLPFEnabledParam) {
+            static float lastLPFEnabledValue = -1.0f;
+            float currentLPFEnabledValue = *chorusLPFEnabledParam;
+            if (currentLPFEnabledValue != lastLPFEnabledValue) {
+                lastLPFEnabledValue = currentLPFEnabledValue;
+                chorusLPFEnabledChanged.store(true);
+                DBG("PluginProcessor: Chorus LPF enabled change detected via fallback - flag set");
+            }
+        }
+        
+        // LPF cutoff parameter fallback
+        if (chorusLPFCutoffParam) {
+            static float lastLPFCutoffValue = -1.0f;
+            float currentLPFCutoffValue = *chorusLPFCutoffParam;
+            if (currentLPFCutoffValue != lastLPFCutoffValue) {
+                lastLPFCutoffValue = currentLPFCutoffValue;
+                chorusLPFCutoffChanged.store(true);
+                DBG("PluginProcessor: Chorus LPF cutoff change detected via fallback - flag set");
+            }
+        }
+        
+        // HPF enabled parameter fallback
+        if (chorusHPFEnabledParam) {
+            static float lastHPFEnabledValue = -1.0f;
+            float currentHPFEnabledValue = *chorusHPFEnabledParam;
+            if (currentHPFEnabledValue != lastHPFEnabledValue) {
+                lastHPFEnabledValue = currentHPFEnabledValue;
+                chorusHPFEnabledChanged.store(true);
+                DBG("PluginProcessor: Chorus HPF enabled change detected via fallback - flag set");
+            }
+        }
+        
+        // HPF cutoff parameter fallback
+        if (chorusHPFCutoffParam) {
+            static float lastHPFCutoffValue = -1.0f;
+            float currentHPFCutoffValue = *chorusHPFCutoffParam;
+            if (currentHPFCutoffValue != lastHPFCutoffValue) {
+                lastHPFCutoffValue = currentHPFCutoffValue;
+                chorusHPFCutoffChanged.store(true);
+                DBG("PluginProcessor: Chorus HPF cutoff change detected via fallback - flag set");
             }
         }
         
