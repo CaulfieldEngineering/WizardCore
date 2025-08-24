@@ -1,0 +1,145 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Design Rule: Config Struct Pattern for Sonic Parameters
+
+## Overview
+This design rule defines the standard pattern for organizing class parameters using a centralized Config struct. The Config struct contains **parameters of sonic or usable interest** - the parameters that define how the module sounds, behaves, and functions musically.
+
+## Core Principle
+
+### **Config Struct = Sonic/Usable Parameters**
+The Config struct contains only parameters that:
+- **Directly affect the sound or behavior**
+- **Define the musical character of the module**
+- **Are of interest to users for creative purposes**
+- **Change how the module functions**
+
+### **Regular Members = System/Technical Parameters**
+Regular member variables contain:
+- **System values** (sample rate, host BPM)
+- **Processing state** (prepared, position, buffers)
+- **Implementation details** (change detection, smoothing)
+
+## Implementation Pattern
+
+### Step 1: Define the Config Struct
+```cpp
+/**
+ * @brief Sonic parameters that define the module's behavior and character
+ */
+struct Config {
+    // Core sonic parameters
+    std::atomic<double> frequencyHz{1.0};           ///< LFO frequency in Hz
+    std::atomic<float> depth{1.0f};                 ///< Modulation depth [0.0, 1.0]
+    std::atomic<double> phaseOffsetRadians{0.0};    ///< Phase offset in radians
+    std::atomic<float> symmetry{0.5f};              ///< Symmetry value [0.1, 0.9]
+    std::atomic<bool> enabled{true};                ///< Enabled state
+    std::atomic<bool> invert{false};                ///< Inversion state
+    std::atomic<WaveShape> waveShape{WaveShape::Sine}; ///< Waveform type
+    std::atomic<CouplingType> coupling{CouplingType::DC}; ///< Coupling type
+    
+    // Musical/sync parameters
+    std::atomic<bool> syncToHost{false};            ///< Host sync state
+    std::atomic<SyncRhythm> syncRhythm{SyncRhythm::QuarterNote}; ///< Sync rhythm
+};
+```
+
+### Step 2: Class Member Variables Organization
+```cpp
+class MyClass {
+private:
+    // ============================================================================
+    // PRIVATE MEMBER VARIABLES
+    // ============================================================================
+    
+    // Sonic parameters (what makes this module sound/behave differently)
+    Config config;
+    
+    // System/technical parameters (not sonic)
+    std::atomic<bool> prepared{false};
+    std::atomic<double> sampleRateHz{44100.0};
+    std::atomic<double> hostBPM{120.0};
+    std::atomic<double> position{0.0f};
+    
+    // Smoothed parameters (prevent audio clicks)
+    juce::SmoothedValue<float> smoothedDepth{config.depth.load()};
+    juce::SmoothedValue<float> smoothedSymmetry{config.symmetry.load()};
+    
+    // Change detection (implementation detail)
+    std::atomic<float> lastFrequency{-1.0f};
+    std::atomic<bool> firstRun{true};
+};
+```
+
+### Step 3: Public Interface
+```cpp
+public:
+    // Access to sonic configuration for debugging/monitoring
+    const Config& getConfig() const { return config; }
+    
+    // Individual parameter setters
+    void setFrequency(double freq) { 
+        config.frequencyHz.store(std::clamp(freq, MIN_FREQ, MAX_FREQ)); 
+    }
+    
+    // Individual parameter getters
+    double getFrequency() const { return config.frequencyHz.load(); }
+    
+    // Batch parameter updates
+    void updateParameters(double freq, float depth, bool enabled) {
+        config.enabled.store(enabled);
+        setFrequency(freq);
+        setDepth(depth);
+    }
+};
+```
+
+## Parameter Categorization
+
+### **Config Struct (Sonic/Usable Interest)**
+- **Include**: Parameters that change the sound, behavior, or musical character
+- **Examples**: Frequency, depth, wave shape, phase offset, symmetry, enabled state
+- **Why**: These are what users care about and what define the module's function
+
+### **Regular Member Variables (System/Technical)**
+- **Include**: System values, processing state, implementation details
+- **Examples**: Sample rate, host BPM, prepared state, position, change detection
+- **Why**: These are technical necessities, not creative parameters
+
+## Simple Rules
+
+1. **Config struct** = "What makes this sound/behave differently?"
+2. **Regular members** = "What does the system/implementation need?"
+3. **All Config parameters** use `std::atomic<T>` for thread safety
+4. **Public getter** `getConfig()` provides access to sonic state
+5. **Individual setters/getters** use `config.param.store()/load()`
+
+## Example Usage
+
+```cpp
+// Get current sonic state
+const auto& config = lfo.getConfig();
+double freq = config.frequencyHz.load();
+WaveShape shape = config.waveShape.load();
+
+// Set sonic parameters
+lfo.setFrequency(2.0);
+lfo.setWaveShape(WaveShape::Triangle);
+
+// Batch update
+lfo.updateParameters(1.5, 0.75, true);
+```
+
+## Benefits
+
+- **Clear separation** between sonic and technical parameters
+- **Easy debugging** - one call gets all sonic state
+- **Thread safety** built into sonic parameters
+- **Intuitive API** - Config contains what users care about
+- **Maintainable** - sonic parameters in one place
+
+
+This pattern ensures the Config struct contains only the parameters that matter for the module's musical and creative function. 

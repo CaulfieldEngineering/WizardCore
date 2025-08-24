@@ -2,39 +2,47 @@
 #include <algorithm>
 #include <cmath>
 
-// Ensure M_PI maps to JUCE MathConstants
+// Ensure M_PI maps to JUCE MathConstants for compatibility
 #ifndef M_PI
 #define M_PI juce::MathConstants<double>::pi
 #endif
 
 namespace audio_plugin {
 
+// ============================================================================
+// CONSTRUCTOR & DESTRUCTOR
+// ============================================================================
+
 LFO::LFO()
 {
-    // Initialize wavetable with a safe default size
+    // Initialize wavetable with safe default size
     waveTable.resize(DEFAULT_WAVETABLE_SIZE, 0.0f);
     initializeWaveTable();
 }
 
 LFO::~LFO() = default;
 
+// ============================================================================
+// INITIALIZATION & SETUP
+// ============================================================================
+
 void LFO::prepare(double newSampleRate)
 {
-    // Validate input
+    // Validate input sample rate
     if (newSampleRate <= 0.0 || newSampleRate > 1000000.0) {
-        jassertfalse; // Invalid sample rate
+        jassertfalse; // Invalid sample rate - should be between 0 and 1MHz
         return;
     }
     
     // Update sample rate atomically
-    sampleRate.store(newSampleRate);
+    sampleRateHz.store(newSampleRate);
     
     // Initialize smoothed parameters with reasonable smoothing time (50ms)
-    smoothedDepth.reset(newSampleRate, 0.05);
-    // Don't reset depth value - preserve whatever was set via setDepth()
+    smoothedDepth.reset(newSampleRate, DEFAULT_SMOOTHING_TIME_SECONDS);
+    // Note: Don't reset depth value - preserve whatever was set via setDepth()
     
-    smoothedSymmetry.reset(newSampleRate, 0.05);
-    //smoothedSymmetry.setCurrentAndTargetValue(0.5f);
+    smoothedSymmetry.reset(newSampleRate, DEFAULT_SMOOTHING_TIME_SECONDS);
+    // Note: Don't reset symmetry value - preserve whatever was set via setSymmetry()
     
     // Initialize wavetable (thread-safe as it's only called during prepare)
     initializeWaveTable();
@@ -54,11 +62,15 @@ void LFO::prepare(double newSampleRate)
     firstRun.store(true);
 }
 
+// ============================================================================
+// INDIVIDUAL PARAMETER SETTERS
+// ============================================================================
+
 void LFO::setFrequency(double frequencyInHz)
 {
     // Clamp frequency to valid range and store atomically
-    double clampedFreq = std::clamp(frequencyInHz, MIN_FREQUENCY, MAX_FREQUENCY);
-    frequency.store(clampedFreq);
+    double clampedFreq = std::clamp(frequencyInHz, MIN_FREQUENCY_HZ, MAX_FREQUENCY_HZ);
+    config.frequencyHz.store(clampedFreq);
     
     // Update increment if prepared
     if (prepared.load()) {
@@ -71,31 +83,39 @@ void LFO::setDepth(float newDepth)
     // Clamp depth to valid range and set target for smoothing
     float clampedDepth = std::clamp(newDepth, 0.0f, 1.0f);
     smoothedDepth.setTargetValue(clampedDepth);
-    //DBG("LFO Smoothed Depth = " << smoothedDepth.getCurrentValue());
 }
 
-void LFO::setPhaseOffset(double phaseOffsetInRadians)
+void LFO::setPhaseOffsetRadians(double phaseOffsetInRadians)
 {
     // Store phase offset atomically (no need to wrap - handled in lookup)
-    phaseOffset.store(phaseOffsetInRadians);
+    config.phaseOffsetRadians.store(phaseOffsetInRadians);
+}
+
+void LFO::setPhaseOffsetDegrees(float phaseOffsetInDegrees)
+{
+    // Clamp to valid range [-180, 180] degrees
+    float clampedDegrees = std::clamp(phaseOffsetInDegrees, -180.0f, 180.0f);
+    
+    // Convert degrees to radians and store
+    double phaseOffsetInRadians = clampedDegrees * (M_PI / 180.0);
+    config.phaseOffsetRadians.store(phaseOffsetInRadians);
 }
 
 void LFO::setInvert(bool shouldInvert)
 {
     // Store invert flag atomically
-    invert.store(shouldInvert);
+    config.invert.store(shouldInvert);
     
     // Regenerate wavetable if prepared, since inversion affects the waveshape
     if (prepared.load()) {
         initializeWaveTable();
-        // DBG("LFO Invert changed to " << (shouldInvert ? "true" : "false") << ", wavetable regenerated");
     }
 }
 
 void LFO::setEnabled(bool shouldEnable)
 {
     // Store enabled flag atomically
-    enabled.store(shouldEnable);
+    config.enabled.store(shouldEnable);
 }
 
 void LFO::setSymmetry(float symmetryValue)
@@ -115,24 +135,22 @@ void LFO::setSymmetry(float symmetryValue)
 
 void LFO::setWaveShape(WaveShape waveshape)
 {
-    waveShape.store(waveshape);
+    config.waveShape.store(waveshape);
     
     // Regenerate wavetable if prepared
     if (prepared.load()) {
         initializeWaveTable();
-        // DBG("LFO WaveShape changed to " << static_cast<int>(waveshape) << ", wavetable regenerated");
     }
 }
 
 void LFO::setSyncToHost(bool shouldSync)
 {
-    syncToHost.store(shouldSync);
+    config.syncToHost.store(shouldSync);
     
     // Reset downbeat tracking when sync mode changes
     if (shouldSync) {
         downbeatDetected.store(false);
         lastDownbeatTime.store(0.0);
-        // DBG("LFO Sync mode enabled - downbeat tracking reset");
     }
     
     // Recalculate increment when sync mode changes
@@ -141,33 +159,14 @@ void LFO::setSyncToHost(bool shouldSync)
     }
 }
 
-void LFO::setSyncRate(int syncRateIndex)
+void LFO::setSyncRhythm(SyncRhythm rhythm)
 {
-    // Clamp to valid range
-    int clampedIndex = std::clamp(syncRateIndex, 0, 5);
-    int oldIndex = this->syncRateIndex.load();
-    
-    // Debug output - always show what we're trying to set
-    const char* syncNames[] = {"1/2 Note", "1/4 Note", "1/4 Triplet", "1/8 Note", "1/8 Triplet", "1/16 Note"};
-    // DBG("LFO setSyncRate called: requested=" << syncRateIndex << ", clamped=" << clampedIndex 
-    //     << " (" << syncNames[clampedIndex] << "), current=" << oldIndex);
-    
-    this->syncRateIndex.store(clampedIndex);
-    
-    // Debug output when sync rate changes
-    if (oldIndex != clampedIndex) {
-        // DBG("LFO Sync Rate changed from " << oldIndex << " (" << syncNames[oldIndex] << ") to " 
-        //     << clampedIndex << " (" << syncNames[clampedIndex] << ")");
-    } else {
-        // DBG("LFO Sync Rate unchanged at " << clampedIndex << " (" << syncNames[clampedIndex] << ")");
-    }
+    // Store the rhythm enum directly
+    config.syncRhythm.store(rhythm);
     
     // Recalculate increment if in sync mode
-    if (prepared.load() && syncToHost.load()) {
-        // DBG("LFO setSyncRate: Calling updateIncrement (sync mode active)");
+    if (prepared.load() && config.syncToHost.load()) {
         updateIncrement();
-    } else {
-        // DBG("LFO setSyncRate: Not calling updateIncrement (prepared=" << (prepared.load() ? "true" : "false") << ", syncToHost=" << (syncToHost.load() ? "true" : "false") << ")");
     }
 }
 
@@ -175,13 +174,87 @@ void LFO::setCoupling(CouplingType couplingType)
 {
     // Store coupling type atomically
     // Note: Should only be called during initialization, not during audio processing
-    coupling.store(couplingType);
+    config.coupling.store(couplingType);
 }
 
-LFO::CouplingType LFO::getCoupling() const
+// ============================================================================
+// BATCH PARAMETER UPDATES
+// ============================================================================
+
+/**
+ * @brief Update all LFO parameters at once with automatic change detection
+ * 
+ * Note: phaseOffset parameter is in radians and gets stored directly without conversion
+ */
+void LFO::updateParameters(float frequency, float depth, bool enabled,
+                          bool invert, float phaseOffset, float symmetry, bool syncToHost,
+                          SyncRhythm syncRhythm, WaveShape waveshape)
 {
-    return coupling.load();
+    // Store enabled state
+    config.enabled.store(enabled);
+    
+    // Check frequency changes
+    if (frequency != lastFrequency.load() || firstRun.load()) {
+        setFrequency(frequency);
+        lastFrequency.store(frequency);
+    }
+    
+    // Check depth changes
+    if (depth != lastDepth.load() || firstRun.load()) {
+        setDepth(depth);
+        lastDepth.store(depth);
+    }
+    
+    // Check invert changes
+    if (invert != lastInvert.load() || firstRun.load()) {
+        setInvert(invert);
+        lastInvert.store(invert);
+    }
+    
+    // Check phase offset changes (phaseOffset parameter is in radians)
+    if (phaseOffset != lastPhaseOffsetInRadians.load() || firstRun.load()) {
+        // Developer safety check: halt if someone passes degrees instead of radians
+        jassert(std::abs(phaseOffset) <= M_PI); // Phase offset should be in radians [-π, π]
+        
+        setPhaseOffsetRadians(phaseOffset); // Store directly in radians
+        lastPhaseOffsetInRadians.store(phaseOffset);
+    }
+    
+    // Check symmetry changes
+    if (symmetry != lastSymmetry.load() || firstRun.load()) {
+        setSymmetry(symmetry);
+        lastSymmetry.store(symmetry);
+    }
+    
+    // Check sync to host changes
+    if (syncToHost != lastSyncToHost.load() || firstRun.load()) {
+        setSyncToHost(syncToHost);
+        lastSyncToHost.store(syncToHost);
+    }
+    
+    // Check sync rhythm changes
+    if (syncRhythm != lastSyncRhythm.load() || firstRun.load()) {
+        setSyncRhythm(syncRhythm);
+        lastSyncRhythm.store(syncRhythm);
+    }
+    
+    // Check waveshape changes
+    if (waveshape != lastWaveshape.load() || firstRun.load()) {
+        setWaveShape(waveshape);
+        lastWaveshape.store(waveshape);
+    }
+    
+    // Note: Coupling parameter removed from updateParameters as it should be set once during initialization
+    
+    // Mark first run as complete
+    if (firstRun.load()) {
+        firstRun.store(false);
+    }
 }
+
+// ============================================================================
+// HOST SYNCHRONIZATION
+// ============================================================================
 
 void LFO::updateHostInfo(double bpm, bool isPlaying)
 {
@@ -189,7 +262,7 @@ void LFO::updateHostInfo(double bpm, bool isPlaying)
     hostIsPlaying.store(isPlaying);
     
     // Recalculate increment if in sync mode
-    if (prepared.load() && syncToHost.load()) {
+    if (prepared.load() && config.syncToHost.load()) {
         updateIncrement();
     }
 }
@@ -203,7 +276,7 @@ void LFO::updateHostInfo(double bpm, bool isPlaying, double beatPosition, double
     hostPPQPosition.store(ppqPosition);
     
     // Check for downbeat locking if in sync mode
-    if (prepared.load() && syncToHost.load() && isPlaying) {
+    if (prepared.load() && config.syncToHost.load() && isPlaying) {
         // Calculate current time based on BPM and PPQ position
         double beatsPerSecond = bpm / 60.0;
         double currentTime = ppqPosition / beatsPerSecond;
@@ -213,6 +286,33 @@ void LFO::updateHostInfo(double bpm, bool isPlaying, double beatPosition, double
     }
 }
 
+void LFO::updateFromPlayHead(juce::AudioPlayHead* playHead)
+{
+    if (playHead != nullptr) {
+        juce::AudioPlayHead::CurrentPositionInfo positionInfo;
+        if (playHead->getCurrentPosition(positionInfo)) {
+            double hostBPM = positionInfo.bpm > 0.0 ? positionInfo.bpm : 120.0;
+            bool isPlaying = positionInfo.isPlaying;
+            
+            // Use the extended version if we have beat position info
+            if (positionInfo.ppqPositionOfLastBarStart >= 0.0) {
+                double beatPosition = positionInfo.ppqPositionOfLastBarStart;
+                double ppqPosition = positionInfo.ppqPosition;
+                updateHostInfo(hostBPM, isPlaying, beatPosition, ppqPosition);
+            } else {
+                updateHostInfo(hostBPM, isPlaying);
+            }
+        }
+    } else {
+        // Fallback when no host available
+        updateHostInfo(120.0, true);
+    }
+}
+
+// ============================================================================
+// AUDIO PROCESSING
+// ============================================================================
+
 float LFO::getNextSample()
 {
     // Early return if not prepared
@@ -221,22 +321,22 @@ float LFO::getNextSample()
     }
     
     // Early return if disabled - return 1.0 (no modulation)
-    if (!enabled.load()) {
+    if (!config.enabled.load()) {
         return 1.0f;
     }
     
-    // Get current values
+    // Get current values atomically
     float currentPos = position.load();
     float currentIncrement = increment.load();
     float currentDepth = smoothedDepth.getNextValue();
-    double currentPhaseOffset = phaseOffset.load();
-    bool currentInvert = invert.load();
+    double currentPhaseOffsetRadians = config.phaseOffsetRadians.load(); // Phase offset in radians
+    bool currentInvert = config.invert.load();
     float currentSymmetry = smoothedSymmetry.getNextValue();
     
-    // Apply phase offset to position
-    float offsetPos = currentPos + static_cast<float>((currentPhaseOffset / TWO_PI) * waveTable.size());
+    // Apply phase offset to position (currentPhaseOffsetRadians is in radians)
+    float offsetPos = currentPos + static_cast<float>((currentPhaseOffsetRadians / TWO_PI) * waveTable.size());
     
-    // Wrap the offset position
+    // Wrap the offset position to valid range
     while (offsetPos >= static_cast<float>(waveTable.size())) {
         offsetPos -= static_cast<float>(waveTable.size());
     }
@@ -285,13 +385,10 @@ float LFO::getNextSample()
     float sample2 = waveTable[index2];
     float output = sample1 + fraction * (sample2 - sample1);
     
-    // Apply inversion if enabled (flip within [0,1] range)
-    //if (currentInvert) {
-    //    output = 1.0f - output;
-    //}
+    // Note: Inversion is now handled during wavetable generation for better performance
     
     // Apply coupling transformation (coupling set once at initialization)
-    if (coupling.load() == CouplingType::AC) {
+    if (config.coupling.load() == CouplingType::AC) {
         // AC coupling: convert [0,1] to [-1,1]
         output = (output * 2.0f) - 1.0f;
     }
@@ -318,21 +415,21 @@ float LFO::getCurrentSample() const
     }
     
     // Early return if disabled - return 1.0 (no modulation)
-    if (!enabled.load()) {
+    if (!config.enabled.load()) {
         return 1.0f;
     }
     
     // Get current values WITHOUT advancing position
     float currentPos = position.load();
     float currentDepth = smoothedDepth.getCurrentValue();
-    double currentPhaseOffset = phaseOffset.load();
-    bool currentInvert = invert.load();
+    double currentPhaseOffsetRadians = config.phaseOffsetRadians.load(); // Phase offset in radians
+    bool currentInvert = config.invert.load();
     float currentSymmetry = smoothedSymmetry.getCurrentValue();
     
-    // Apply phase offset to position
-    float offsetPos = currentPos + static_cast<float>((currentPhaseOffset / TWO_PI) * waveTable.size());
+    // Apply phase offset to position (currentPhaseOffsetRadians is in radians)
+    float offsetPos = currentPos + static_cast<float>((currentPhaseOffsetRadians / TWO_PI) * waveTable.size());
     
-    // Wrap the offset position
+    // Wrap the offset position to valid range
     while (offsetPos >= static_cast<float>(waveTable.size())) {
         offsetPos -= static_cast<float>(waveTable.size());
     }
@@ -381,13 +478,10 @@ float LFO::getCurrentSample() const
     float sample2 = waveTable[index2];
     float output = sample1 + fraction * (sample2 - sample1);
     
-    // Apply inversion if enabled (flip within [0,1] range)
-    //if (currentInvert) {
-    //    output = 1.0f - output;
-    //}
+    // Note: Inversion is now handled during wavetable generation for better performance
     
     // Apply coupling transformation (coupling set once at initialization)
-    if (coupling.load() == CouplingType::AC) {
+    if (config.coupling.load() == CouplingType::AC) {
         // AC coupling: convert [0,1] to [-1,1]
         output = (output * 2.0f) - 1.0f;
     }
@@ -397,77 +491,9 @@ float LFO::getCurrentSample() const
     return output * currentDepth;
 }
 
-float LFO::calculateSyncFrequency() const
-{
-    // Get current values atomically
-    double currentBPM = hostBPM.load();
-    int currentSyncRate = syncRateIndex.load();
-    
-    if (currentBPM <= 0.0) {
-        return 1.0f;  // Fallback
-    }
-    
-    // Calculate beats per second
-    double beatsPerSecond = currentBPM / 60.0;
-    
-    // Sync rate multipliers for different note divisions
-    const double syncRateMultipliers[] = {0.5, 1.0, 1.333, 2.0, 2.667, 4.0};
-    
-    float resultFreq = 1.0f;  // Fallback
-    
-    if (currentSyncRate >= 0 && currentSyncRate < 6) {
-        const char* syncNames[] = {"1/2 Note", "1/4 Note", "1/4 Triplet", "1/8 Note", "1/8 Triplet", "1/16 Note"};
-        resultFreq = beatsPerSecond * syncRateMultipliers[currentSyncRate];
-        
-        // Debug output to track sync frequency calculations
-        // DBG("LFO Sync: BPM=" << currentBPM << ", SyncRateIndex=" << currentSyncRate 
-        //     << " (" << syncNames[currentSyncRate] << "), Multiplier=" << syncRateMultipliers[currentSyncRate] 
-        //     << ", BeatsPerSec=" << beatsPerSecond << ", ResultFreq=" << resultFreq << "Hz");
-    } else {
-        DBG("LFO Sync: Invalid sync rate index " << currentSyncRate << ", using fallback");
-    }
-    
-    return resultFreq;
-}
-
-void LFO::updateIncrement()
-{
-    // Calculate increment safely
-    double currentSampleRate = sampleRate.load();
-    
-    if (currentSampleRate <= 0.0 || waveTable.empty()) {
-        increment.store(0.0f);
-        return;
-    }
-    
-    float currentFrequency;
-    bool usingSyncMode = syncToHost.load();
-    
-    if (usingSyncMode) {
-        // Use host sync frequency and apply the same clamping as manual frequency
-        float rawSyncFreq = calculateSyncFrequency();
-        currentFrequency = std::clamp(rawSyncFreq, static_cast<float>(MIN_FREQUENCY), static_cast<float>(MAX_FREQUENCY));
-        
-        // DBG("LFO updateIncrement: Sync mode - Raw=" << rawSyncFreq << "Hz, Clamped=" << currentFrequency << "Hz");
-    } else {
-        // Use manual frequency
-        currentFrequency = static_cast<float>(frequency.load());
-        
-        // DBG("LFO updateIncrement: Manual mode - Frequency=" << currentFrequency << "Hz");
-    }
-    
-    // Calculate increment: (frequency * tableSize) / sampleRate
-    double newIncrement = (currentFrequency * waveTable.size()) / currentSampleRate;
-    
-    // Clamp to reasonable bounds to prevent overflow
-    double clampedIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
-    
-    // DBG("LFO increment: Freq=" << currentFrequency << "Hz, TableSize=" << waveTable.size() 
-    //     << ", SampleRate=" << currentSampleRate << ", RawIncrement=" << newIncrement 
-    //     << ", ClampedIncrement=" << clampedIncrement);
-    
-    increment.store(static_cast<float>(clampedIncrement));
-}
+// ============================================================================
+// STATE CONTROL
+// ============================================================================
 
 void LFO::reset()
 {
@@ -491,6 +517,10 @@ void LFO::reset(double phaseInRadians)
     newPos = std::clamp(newPos, 0.0f, static_cast<float>(waveTable.size()) - 1.0f);
     position.store(newPos);
 }
+
+// ============================================================================
+// UTILITY GETTERS
+// ============================================================================
 
 float LFO::getPosition() const
 {
@@ -519,7 +549,7 @@ int LFO::getWaveTableSize() const
 
 juce::String LFO::getWaveShapeName() const
 {
-    WaveShape currentShape = waveShape.load();
+    WaveShape currentShape = config.waveShape.load();
     
     switch (currentShape) {
         case WaveShape::Sine:
@@ -541,17 +571,41 @@ juce::String LFO::getWaveShapeName() const
     }
 }
 
-// Private helper methods
+juce::String LFO::getSyncRhythmName() const
+{
+    SyncRhythm currentRhythm = config.syncRhythm.load();
+    
+    switch (currentRhythm) {
+        case SyncRhythm::HalfNote:
+            return "1/2 Note";
+        case SyncRhythm::QuarterNote:
+            return "1/4 Note";
+        case SyncRhythm::QuarterTriplet:
+            return "1/4 Triplet";
+        case SyncRhythm::EighthNote:
+            return "1/8 Note";
+        case SyncRhythm::EighthTriplet:
+            return "1/8 Triplet";
+        case SyncRhythm::SixteenthNote:
+            return "1/16 Note";
+        default:
+            return "Unknown";
+    }
+}
+
+// ============================================================================
+// PRIVATE HELPER METHODS
+// ============================================================================
 
 void LFO::initializeWaveTable()
 {
-    // Ensure wavetable has a reasonable size
+    // Ensure wavetable has the correct size
     if (waveTable.size() != DEFAULT_WAVETABLE_SIZE) {
         waveTable.resize(DEFAULT_WAVETABLE_SIZE);
     }
     
     // Generate waveform based on selected waveshape
-    WaveShape currentShape = waveShape.load();
+    WaveShape currentShape = config.waveShape.load();
     
     switch (currentShape) {
         case WaveShape::Sine:
@@ -581,21 +635,92 @@ void LFO::initializeWaveTable()
     }
 }
 
+void LFO::updateIncrement()
+{
+    // Calculate increment safely
+    double currentSampleRate = sampleRateHz.load();
+    
+    if (currentSampleRate <= 0.0 || waveTable.empty()) {
+        increment.store(0.0f);
+        return;
+    }
+    
+    float currentFrequency;
+    bool usingSyncMode = config.syncToHost.load();
+    
+    if (usingSyncMode) {
+        // Use host sync frequency and apply the same clamping as manual frequency
+        float rawSyncFreq = calculateSyncFrequency();
+        currentFrequency = std::clamp(rawSyncFreq, static_cast<float>(MIN_FREQUENCY_HZ), static_cast<float>(MAX_FREQUENCY_HZ));
+    } else {
+        // Use manual frequency
+        currentFrequency = static_cast<float>(config.frequencyHz.load());
+    }
+    
+    // Calculate increment: (frequency * tableSize) / sampleRate
+    double newIncrement = (currentFrequency * waveTable.size()) / currentSampleRate;
+    
+    // Clamp to reasonable bounds to prevent overflow
+    double clampedIncrement = std::clamp(newIncrement, 0.0, static_cast<double>(waveTable.size()) * 0.5);
+    
+    increment.store(static_cast<float>(clampedIncrement));
+}
+
+float LFO::calculateSyncFrequency() const
+{
+    // Get current values atomically
+    double currentBPM = hostBPM.load();
+    SyncRhythm currentRhythm = config.syncRhythm.load();
+    
+    if (currentBPM <= 0.0) {
+        return 1.0f;  // Fallback frequency
+    }
+    
+    // Calculate beats per second
+    double beatsPerSecond = currentBPM / 60.0;
+    
+    // Sync rhythm multipliers for different note divisions
+    float resultFreq = 1.0f;  // Fallback frequency
+    
+    switch (currentRhythm) {
+        case SyncRhythm::HalfNote:
+            resultFreq = beatsPerSecond * 0.5;
+            break;
+        case SyncRhythm::QuarterNote:
+            resultFreq = beatsPerSecond * 1.0;
+            break;
+        case SyncRhythm::QuarterTriplet:
+            resultFreq = beatsPerSecond * 1.333;
+            break;
+        case SyncRhythm::EighthNote:
+            resultFreq = beatsPerSecond * 2.0;
+            break;
+        case SyncRhythm::EighthTriplet:
+            resultFreq = beatsPerSecond * 2.667;
+            break;
+        case SyncRhythm::SixteenthNote:
+            resultFreq = beatsPerSecond * 4.0;
+            break;
+        default:
+            resultFreq = beatsPerSecond * 1.0; // Default to quarter note
+            break;
+    }
+    
+    return resultFreq;
+}
+
 void LFO::checkForDownbeatLock(double currentTime)
 {
     // Check if we're at or very close to a downbeat (beatPosition near 0.0)
     double currentBeatPos = hostBeatPosition.load();
     
-    // Consider it a downbeat if we're within 0.1 beats of the start
-    // This provides some tolerance for timing variations
-    if (currentBeatPos < 0.1 || currentBeatPos > 0.9) {
+    // Consider it a downbeat if we're within tolerance of the start
+    if (currentBeatPos < DOWNBEAT_TOLERANCE_BEATS || currentBeatPos > (1.0 - DOWNBEAT_TOLERANCE_BEATS)) {
         // Check if this is a new downbeat (not the same one we already processed)
         double lastDownbeat = lastDownbeatTime.load();
         
         // If this is a new downbeat, reset the LFO phase
-        if (std::abs(currentTime - lastDownbeat) > 0.1) { // At least 0.1 seconds difference
-            // DBG("LFO Downbeat detected at beat position " << currentBeatPos << ", resetting phase");
-            
+        if (std::abs(currentTime - lastDownbeat) > DOWNBEAT_TIME_TOLERANCE_SECONDS) {
             // Reset LFO position to start of waveform (phase 0)
             position.store(0.0f);
             
@@ -606,12 +731,16 @@ void LFO::checkForDownbeatLock(double currentTime)
     }
 }
 
+// ============================================================================
+// WAVEFORM GENERATION METHODS
+// ============================================================================
+
 void LFO::generateSineWave()
 {
     const int tableSize = static_cast<int>(waveTable.size());
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -629,7 +758,7 @@ void LFO::generateSineWave()
         float y = (sineValue * 0.5f) + 0.5f;
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -646,7 +775,7 @@ void LFO::generateSineWave()
         float y = (sineValue * 0.5f) + 0.5f;
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -657,10 +786,10 @@ void LFO::generateSineWave()
 void LFO::generateRampDownWave()
 {
     const int tableSize = static_cast<int>(waveTable.size());
-    float deltaDown = 0.01f;
+    float deltaDown = 0.01f; // Corner rounding parameter
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -685,7 +814,7 @@ void LFO::generateRampDownWave()
         }
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             x = 1.0f - x;
         }
         
@@ -696,10 +825,10 @@ void LFO::generateRampDownWave()
 void LFO::generateRampUpWave()
 {
     const int tableSize = static_cast<int>(waveTable.size());
-    float deltaUp = 0.01f;
+    float deltaUp = 0.01f; // Corner rounding parameter
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -724,7 +853,7 @@ void LFO::generateRampUpWave()
         }
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             x = 1.0f - x;
         }
         
@@ -735,10 +864,10 @@ void LFO::generateRampUpWave()
 void LFO::generateSquareWave()
 {
     const int tableSize = static_cast<int>(waveTable.size());
-    float deltaPulse = 0.01f;
+    float deltaPulse = 0.01f; // Corner rounding parameter
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -751,7 +880,7 @@ void LFO::generateSquareWave()
         float y = 0.5f + ((0.5f / std::atan(1.0f / deltaPulse)) * std::atan(std::sin(M_PI * i / periodLeft) / deltaPulse));
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -763,7 +892,7 @@ void LFO::generateSquareWave()
         float y = 0.5f - ((0.5f / std::atan(1.0f / deltaPulse)) * std::atan(std::sin(M_PI * (i - periodLeft) / periodRight) / deltaPulse));
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -776,7 +905,7 @@ void LFO::generateTriangleWave()
     const int tableSize = static_cast<int>(waveTable.size());
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -789,7 +918,7 @@ void LFO::generateTriangleWave()
         float y = static_cast<float>(i) / periodLeft;
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -801,7 +930,7 @@ void LFO::generateTriangleWave()
         float y = 1.0f - (static_cast<float>(i - periodLeft) / periodRight);
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -814,7 +943,7 @@ void LFO::generateHumpDownWave()
     const int tableSize = static_cast<int>(waveTable.size());
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -827,7 +956,7 @@ void LFO::generateHumpDownWave()
         float y = std::sin(0.5f * M_PI * i / periodLeft);
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -839,7 +968,7 @@ void LFO::generateHumpDownWave()
         float y = std::cos(0.5f * M_PI * (i - periodLeft) / periodRight);
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -852,7 +981,7 @@ void LFO::generateHumpUpWave()
     const int tableSize = static_cast<int>(waveTable.size());
     
     // Calculate periods based on current symmetry setting
-    float currentSymmetry = smoothedSymmetry.getCurrentValue();
+    float currentSymmetry = config.symmetry.load();
     int periodLeft = static_cast<int>(tableSize * currentSymmetry);
     int periodRight = tableSize - periodLeft;
     
@@ -865,7 +994,7 @@ void LFO::generateHumpUpWave()
         float y = (-std::sin(0.5f * M_PI * i / periodLeft) + 1.0f);
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -877,7 +1006,7 @@ void LFO::generateHumpUpWave()
         float y = (-std::cos(0.5f * M_PI * (i - periodLeft) / periodRight) + 1.0f);
         
         // Apply inversion if enabled
-        if (invert.load()) {
+        if (config.invert.load()) {
             y = 1.0f - y;
         }
         
@@ -885,90 +1014,8 @@ void LFO::generateHumpUpWave()
     }
 }
 
-void LFO::updateParameters(float frequency, float depth, bool enabled,
-                          bool invert, float phaseOffset, float symmetry, bool syncToHost,
-                          int syncRate, WaveShape waveshape)
-{
-    // Store enabled state
-    this->enabled.store(enabled);
-    
-    // Check frequency changes
-    if (frequency != lastFrequency.load() || firstRun.load()) {
-        setFrequency(frequency);
-        lastFrequency.store(frequency);
-    }
-    
-    // Check depth changes
-    if (depth != lastDepth.load() || firstRun.load()) {
-        setDepth(depth);
-        lastDepth.store(depth);
-    }
-    
-    // Check invert changes
-    if (invert != lastInvert.load() || firstRun.load()) {
-        setInvert(invert);
-        lastInvert.store(invert);
-    }
-    
-    // Check phase offset changes
-    if (phaseOffset != lastPhaseOffset.load() || firstRun.load()) {
-        setPhaseOffset(phaseOffset * (M_PI / 180.0f)); // Convert degrees to radians
-        lastPhaseOffset.store(phaseOffset);
-    }
-    
-    // Check symmetry changes
-    if (symmetry != lastSymmetry.load() || firstRun.load()) {
-        setSymmetry(symmetry);
-        lastSymmetry.store(symmetry);
-    }
-    
-    // Check sync to host changes
-    if (syncToHost != lastSyncToHost.load() || firstRun.load()) {
-        setSyncToHost(syncToHost);
-        lastSyncToHost.store(syncToHost);
-    }
-    
-    // Check sync rate changes
-    if (syncRate != lastSyncRate.load() || firstRun.load()) {
-        setSyncRate(syncRate);
-        lastSyncRate.store(syncRate);
-    }
-    
-    // Check waveshape changes
-    if (waveshape != lastWaveshape.load() || firstRun.load()) {
-        setWaveShape(waveshape);
-        lastWaveshape.store(waveshape);
-    }
-    
-    // Note: Coupling parameter removed from updateParameters as it should be set once during initialization
-    
-    // Mark first run as complete
-    if (firstRun.load()) {
-        firstRun.store(false);
-    }
-}
+// ============================================================================
+// CONFIG STRUCT METHODS
+// ============================================================================
 
-void LFO::updateFromPlayHead(juce::AudioPlayHead* playHead)
-{
-    if (playHead != nullptr) {
-        juce::AudioPlayHead::CurrentPositionInfo positionInfo;
-        if (playHead->getCurrentPosition(positionInfo)) {
-            double hostBPM = positionInfo.bpm > 0.0 ? positionInfo.bpm : 120.0;
-            bool isPlaying = positionInfo.isPlaying;
-            
-            // Use the extended version if we have beat position info
-            if (positionInfo.ppqPositionOfLastBarStart >= 0.0) {
-                double beatPosition = positionInfo.ppqPositionOfLastBarStart;
-                double ppqPosition = positionInfo.ppqPosition;
-                updateHostInfo(hostBPM, isPlaying, beatPosition, ppqPosition);
-            } else {
-                updateHostInfo(hostBPM, isPlaying);
-            }
-        }
-    } else {
-        // Fallback when no host available
-        updateHostInfo(120.0, true);
-    }
-}
-
-} // namespace audio_plugin 
+} // namespace audio_plugin

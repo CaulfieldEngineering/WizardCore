@@ -9,7 +9,7 @@ alwaysApply: true
     - WaveShape (not Waveform)
     - When referencing rate, clarify rate type:
       - Modulation Rate? LFO Frequency? Etc.
-      - For user facing parameters, prefer Degrees over Radians.
+      - Unitize all user-facing phase parameters in degrees.  All internal phase calculations should be performed in radians.
 
 - New development should never break potential legacy code.  When so, the designer should be alerted before moving forward.
   
@@ -17,19 +17,34 @@ alwaysApply: true
 
 - All modules should have individual setters/getters to update each parameter individually, as well as a single updateParameters method to pass all arguments in one go, with any one of the arguments being optional.
 
-- "Key Parameters" are all critical values which may be of interest to be exposed to either end-users or developers to tune the sound or behavior of a product o r module.  Default key parameter values should be initialized in a "configure" array in the header, and then the initializations should reference this array.  No key parameter values should be hardwired into the code.  This includes relevant module parameters but does NOT mundane values like mathematical constants or intermediate calculations.
-
 - Maintain modularity and DRY principles.  When parameters are assigned internal to a class, they should use the designated internal setters/getters rather than additional longform code, when possible.
 
+- Variables and intermediate values should be heavily clarified, showing details and units.  Include units in method names when applicable.
+
+- When tasked with developing a parent class, do NOT modify external/child classes, or any other files, to achieve the needs of the class you're developing.
+
 - Due to the nature of my workflow, the software written in Cursor is transferred to and then built in Visual Studio.  Because of this, you cannot actually run the code you build.  You do not need to spend effort attempting to run the code.
+
+- See design rule "config-struct" for information on how to arrange relevant parameters and their accesibility.
 
 - In general, conform new development or relevant updates to these design rules - but do not go out of your way to tear up old code to conform it.
 
 - Refer to the associated MD Documentation files when implementing development, but refrain from spending time updating it until asked.
 
-- Include copious comments, explanations, formatting and white space.
+# Formatting
+- When adding new content, consider method positioning in order to keep relevant methods sectioned together.  DSP should remain together; setters/getters remain together, helper/utility functions remain together, etc.  For existing code, do not spend effort on moving code around if it is not the subject of discussion.  Include copious comments, explanations, formatting and white space. Examples below:
 
-- When adding new content, consider method positioning in order to keep relevant methods sectioned together.  DSP should remain together; setters/getters remain together, helper/utility functions remain together, etc.  For existing code, do not spend effort on moving code around if it is not the subject of discussion.
+    // ============================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    // ============================================================================
+    ~code...
 
+    // ============================================================================
+    // INDIVIDUAL PARAMETER SETTERS
+    // ============================================================================
+    ~code...
 
-- Variables and intermediate values should be heavily clarified, showing details and units.  Include units in method names when applicable.
+    // ============================================================================
+    // AUDIO PROCESSING
+    // ============================================================================
+    ~code...

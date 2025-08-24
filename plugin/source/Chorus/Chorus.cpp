@@ -31,12 +31,12 @@ Chorus::Chorus(int maxVoicesIn) : maxVoices(juce::jlimit(MIN_MAX_VOICES, MAX_MAX
         // Set LFO parameters directly on LFO objects
         voices[i].lfos[0].setFrequency(voiceRate);
         voices[i].lfos[0].setDepth(voiceDepth);
-        voices[i].lfos[0].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+        voices[i].lfos[0].setPhaseOffsetRadians(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
         voices[i].lfos[0].setEnabled(voices[i].enabled.load());
         
         voices[i].lfos[1].setFrequency(voiceRate);
         voices[i].lfos[1].setDepth(voiceDepth);
-        voices[i].lfos[1].setPhaseOffset(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
+        voices[i].lfos[1].setPhaseOffsetRadians(voicePhase * juce::MathConstants<double>::pi / 180.0); // Convert to radians
         voices[i].lfos[1].setEnabled(voices[i].enabled.load());
         
         // Initialize delay lines with default type (BBDelay - matches currentDelayType default)
@@ -247,8 +247,8 @@ void Chorus::configureMonoPhaseOffsets() {
     for (int i = 0; i < numActiveVoices; ++i) {
         Voice& voice = voices[i];
         // Set zero phase offset on both LFO objects
-        voice.lfos[0].setPhaseOffset(0.0);
-        voice.lfos[1].setPhaseOffset(0.0);
+        voice.lfos[0].setPhaseOffsetRadians(0.0);
+        voice.lfos[1].setPhaseOffsetRadians(0.0);
     }
 }
 
@@ -272,8 +272,8 @@ void Chorus::configureStereoPhaseOffsets() {
         rightPhaseOffset += voiceSpread;
         
         // Set phase offsets directly on LFO objects (convert degrees to radians)
-        voice.lfos[0].setPhaseOffset(leftPhaseOffset * juce::MathConstants<double>::pi / 180.0);
-        voice.lfos[1].setPhaseOffset(rightPhaseOffset * juce::MathConstants<double>::pi / 180.0);
+        voice.lfos[0].setPhaseOffsetRadians(leftPhaseOffset * juce::MathConstants<double>::pi / 180.0);
+        voice.lfos[1].setPhaseOffsetRadians(rightPhaseOffset * juce::MathConstants<double>::pi / 180.0);
     }
 }
 
@@ -297,8 +297,8 @@ void Chorus::configureMidSidePhaseOffsets() {
         sidePhaseOffset += voiceSpread;
         
         // Set phase offsets directly on LFO objects (convert degrees to radians)
-        voice.lfos[0].setPhaseOffset(midPhaseOffset * juce::MathConstants<double>::pi / 180.0);
-        voice.lfos[1].setPhaseOffset(sidePhaseOffset * juce::MathConstants<double>::pi / 180.0);
+        voice.lfos[0].setPhaseOffsetRadians(midPhaseOffset * juce::MathConstants<double>::pi / 180.0);
+        voice.lfos[1].setPhaseOffsetRadians(sidePhaseOffset * juce::MathConstants<double>::pi / 180.0);
     }
 }
 
@@ -611,12 +611,12 @@ void Chorus::syncRightLFOsToLeft() {
         // Copy all parameters from left LFO (index 0) to right LFO (index 1)
         voice.lfos[1].setFrequency(voice.lfos[0].getFrequency());
         voice.lfos[1].setDepth(voice.lfos[0].getDepth());
-        voice.lfos[1].setPhaseOffset(voice.lfos[0].getPhaseOffset());
+        voice.lfos[1].setPhaseOffsetRadians(voice.lfos[0].getPhaseOffsetRadians());
         voice.lfos[1].setSymmetry(voice.lfos[0].getSymmetry());
         voice.lfos[1].setWaveShape(voice.lfos[0].getWaveShape());
         voice.lfos[1].setInvert(voice.lfos[0].getInvert());
         voice.lfos[1].setSyncToHost(voice.lfos[0].getSyncToHost());
-        voice.lfos[1].setSyncRate(voice.lfos[0].getSyncRate());
+        voice.lfos[1].setSyncRhythm(voice.lfos[0].getSyncRhythm());
         voice.lfos[1].setEnabled(voice.lfos[0].isEnabled());
         
         // Reset the right LFO position to match left LFO
@@ -986,7 +986,7 @@ float Chorus::getVoicePhaseOffset(int voiceIndex) const {
         return 0.0f;
     }
     // Return phase offset from left LFO (convert from radians to degrees)
-    return static_cast<float>(voices[voiceIndex].lfos[0].getPhaseOffset() * 180.0 / juce::MathConstants<double>::pi);
+    return static_cast<float>(voices[voiceIndex].lfos[0].getPhaseOffsetRadians() * 180.0 / juce::MathConstants<double>::pi);
 }
 
 bool Chorus::isVoiceEnabled(int voiceIndex) const {

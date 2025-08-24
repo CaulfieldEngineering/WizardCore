@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "Chorus/Chorus.h"
+#include "DelayLine/DelayLine.h"
 
 namespace audio_plugin {
     AudioPluginAudioProcessor::AudioPluginAudioProcessor()
@@ -307,7 +308,7 @@ namespace audio_plugin {
         // This is the place where you check if the layout is supported.
         // In this template code we only support mono or stereo.
         // Some plugin hosts, such as certain GarageBand versions, will only
-        // load plugins that support stereo bus layouts.
+        // load plugins that support mono or stereo bus layouts.
         if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
             layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
             return false;
@@ -360,38 +361,64 @@ namespace audio_plugin {
                                        chorusEnabledChanged.load();
 
         if (hasAnyParamChange) {
-            Chorus::UpdateArgs args;
-
-            if (delayTypeChanged.load()) {
-                if (chorusDelayTypeParam) {
-                    const float delayTypeChoice = *chorusDelayTypeParam;
-                    const DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
-                    args.delayType = delayType;
-                    DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade")
-                        << " (raw value: " << delayTypeChoice << ")");
-                }
+            // Update delay type if changed
+            if (delayTypeChanged.load() && chorusDelayTypeParam) {
+                const float delayTypeChoice = *chorusDelayTypeParam;
+                const DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
+                chorus.setDelayType(delayType);
+                DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade")
+                    << " (raw value: " << delayTypeChoice << ")");
             }
 
-            if (chorusRateChanged.load() && chorusRateParam)       args.rate = static_cast<float>(*chorusRateParam);
-            if (chorusDepthChanged.load() && chorusDepthParam)     args.depth = static_cast<float>(*chorusDepthParam);
-            if (chorusMixChanged.load() && chorusMixParam)         args.mix = static_cast<float>(*chorusMixParam);
-            if (chorusBaseDelayChanged.load() && chorusBaseDelayParam) args.baseDelayMs = static_cast<float>(*chorusBaseDelayParam);
-            if (chorusVoiceCountChanged.load() && chorusVoiceCountParam) args.voiceCount = static_cast<int>(*chorusVoiceCountParam);
+            // Update chorus parameters using the correct method signature
+            if (chorusRateChanged.load() && chorusRateParam) {
+                chorus.setRate(static_cast<float>(*chorusRateParam));
+            }
+            if (chorusDepthChanged.load() && chorusDepthParam) {
+                chorus.setDepth(static_cast<float>(*chorusDepthParam));
+            }
+            if (chorusMixChanged.load() && chorusMixParam) {
+                chorus.setMix(static_cast<float>(*chorusMixParam));
+            }
+            if (chorusBaseDelayChanged.load() && chorusBaseDelayParam) {
+                chorus.setBaseDelay(static_cast<float>(*chorusBaseDelayParam));
+            }
+            if (chorusVoiceCountChanged.load() && chorusVoiceCountParam) {
+                chorus.setVoiceCount(static_cast<int>(*chorusVoiceCountParam));
+            }
 
-            if (chorusStereoModeChanged.load() && chorusStereoModeParam)   args.stereoMode = static_cast<int>(*chorusStereoModeParam);
-            if (chorusStereoSpreadChanged.load() && chorusStereoSpreadParam) args.stereoSpread = static_cast<float>(*chorusStereoSpreadParam);
+            // Update stereo parameters
+            if (chorusStereoModeChanged.load() && chorusStereoModeParam) {
+                chorus.setStereoMode(static_cast<int>(*chorusStereoModeParam));
+            }
+            if (chorusStereoSpreadChanged.load() && chorusStereoSpreadParam) {
+                chorus.setStereoSpread(static_cast<float>(*chorusStereoSpreadParam));
+            }
 
-            if (chorusMidEnabledChanged.load() && chorusMidEnabledParam)   args.midEnabled = (static_cast<float>(*chorusMidEnabledParam) > 0.5f);
-            if (chorusSideEnabledChanged.load() && chorusSideEnabledParam) args.sideEnabled = (static_cast<float>(*chorusSideEnabledParam) > 0.5f);
-            if (chorusSideGainChanged.load() && chorusSideGainParam)       args.sideGainDb = static_cast<float>(*chorusSideGainParam);
+            // Update mid-side parameters
+            if (chorusMidEnabledChanged.load() && chorusMidEnabledParam) {
+                chorus.setMidEnabled(static_cast<float>(*chorusMidEnabledParam) > 0.5f);
+            }
+            if (chorusSideEnabledChanged.load() && chorusSideEnabledParam) {
+                chorus.setSideEnabled(static_cast<float>(*chorusSideEnabledParam) > 0.5f);
+            }
+            if (chorusSideGainChanged.load() && chorusSideGainParam) {
+                chorus.setSideGain(static_cast<float>(*chorusSideGainParam));
+            }
 
-            if (chorusLPFEnabledChanged.load() && chorusLPFEnabledParam)   args.lpfEnabled = (static_cast<float>(*chorusLPFEnabledParam) > 0.5f);
-            if (chorusLPFCutoffChanged.load() && chorusLPFCutoffParam)     args.lpfCutoffHz = static_cast<float>(*chorusLPFCutoffParam);
-            if (chorusHPFEnabledChanged.load() && chorusHPFEnabledParam)   args.hpfEnabled = (static_cast<float>(*chorusHPFEnabledParam) > 0.5f);
-            if (chorusHPFCutoffChanged.load() && chorusHPFCutoffParam)     args.hpfCutoffHz = static_cast<float>(*chorusHPFCutoffParam);
-
-            // Apply parameter updates in one call
-            chorus.updateParameters(args);
+            // Update filter parameters
+            if (chorusLPFEnabledChanged.load() && chorusLPFEnabledParam) {
+                chorus.setLPFEnabled(static_cast<float>(*chorusLPFEnabledParam) > 0.5f);
+            }
+            if (chorusLPFCutoffChanged.load() && chorusLPFCutoffParam) {
+                chorus.setLPFCutoff(static_cast<float>(*chorusLPFCutoffParam));
+            }
+            if (chorusHPFEnabledChanged.load() && chorusHPFEnabledParam) {
+                chorus.setHPFEnabled(static_cast<float>(*chorusHPFEnabledParam) > 0.5f);
+            }
+            if (chorusHPFCutoffChanged.load() && chorusHPFCutoffParam) {
+                chorus.setHPFCutoff(static_cast<float>(*chorusHPFCutoffParam));
+            }
 
             // Update enabled state if changed
             if (chorusEnabledChanged.load() && chorusEnabledParam) {
