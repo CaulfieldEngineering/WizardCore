@@ -276,7 +276,11 @@ namespace audio_plugin {
         chorus.setVoiceCount(1);  // Start with 1 voice
         chorus.setMix(0.5f);     // 50% wet/dry mix
         chorus.setBaseDelay(30.0f); // 30ms base delay
-		
+        
+        // Set initial enabled state from parameter
+        const bool initiallyEnabled = chorusEnabledParam ? (*chorusEnabledParam > 0.5f) : true;
+        chorus.setEnabled(initiallyEnabled);
+        
         // Set all parameter change flags to ensure initial update
         delayTypeChanged.store(true);
         chorusRateChanged.store(true);
@@ -337,98 +341,91 @@ namespace audio_plugin {
             return;
         }
 
-        // Update chorus parameters from the AudioProcessorValueTreeState
-        if (chorusEnabledParam && *chorusEnabledParam > 0.5f) {
-            // Only process if chorus is enabled
-            
-            // Check if delay type needs to be updated
+        // Build and apply parameter updates only when something changed
+        const bool hasAnyParamChange = delayTypeChanged.load() ||
+                                       chorusRateChanged.load() ||
+                                       chorusDepthChanged.load() ||
+                                       chorusMixChanged.load() ||
+                                       chorusBaseDelayChanged.load() ||
+                                       chorusVoiceCountChanged.load() ||
+                                       chorusStereoModeChanged.load() ||
+                                       chorusStereoSpreadChanged.load() ||
+                                       chorusMidEnabledChanged.load() ||
+                                       chorusSideEnabledChanged.load() ||
+                                       chorusSideGainChanged.load() ||
+                                       chorusLPFEnabledChanged.load() ||
+                                       chorusLPFCutoffChanged.load() ||
+                                       chorusHPFEnabledChanged.load() ||
+                                       chorusHPFCutoffChanged.load() ||
+                                       chorusEnabledChanged.load();
+
+        if (hasAnyParamChange) {
+            Chorus::UpdateArgs args;
+
             if (delayTypeChanged.load()) {
-                // Get the current delay type parameter value
                 if (chorusDelayTypeParam) {
-                    float delayTypeChoice = *chorusDelayTypeParam;
-                    // Choice parameter returns: 0.0 = "Digital", 1.0 = "Bucket Brigade"
-                    DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
-                    
-                    // Update the chorus delay type
-                    chorus.setDelayType(delayType);
-                    
-                    DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade") 
+                    const float delayTypeChoice = *chorusDelayTypeParam;
+                    const DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
+                    args.delayType = delayType;
+                    DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade")
                         << " (raw value: " << delayTypeChoice << ")");
                 }
-                
-                // Clear the flag
-                delayTypeChanged.store(false);
             }
-            
-            // Check and update other parameters only when they've changed
-            bool parametersUpdated = false;
-            
-            // Get all current parameter values
-            float rate = chorusRateParam ? static_cast<float>(*chorusRateParam) : 0.8f;
-            float depth = chorusDepthParam ? static_cast<float>(*chorusDepthParam) : 0.5f;
-            float mix = chorusMixParam ? static_cast<float>(*chorusMixParam) : 0.5f;
-            float baseDelay = chorusBaseDelayParam ? static_cast<float>(*chorusBaseDelayParam) : 30.0f;
-            int voiceCount = chorusVoiceCountParam ? static_cast<int>(*chorusVoiceCountParam) : 1;
-            
-            // Convert stereo mode choice to integer (0=Mono, 1=Stereo, 2=MidSide)
-            int stereoMode = 0; // Default to Mono
-            if (chorusStereoModeParam) {
-                stereoMode = static_cast<int>(*chorusStereoModeParam);
+
+            if (chorusRateChanged.load() && chorusRateParam)       args.rate = static_cast<float>(*chorusRateParam);
+            if (chorusDepthChanged.load() && chorusDepthParam)     args.depth = static_cast<float>(*chorusDepthParam);
+            if (chorusMixChanged.load() && chorusMixParam)         args.mix = static_cast<float>(*chorusMixParam);
+            if (chorusBaseDelayChanged.load() && chorusBaseDelayParam) args.baseDelayMs = static_cast<float>(*chorusBaseDelayParam);
+            if (chorusVoiceCountChanged.load() && chorusVoiceCountParam) args.voiceCount = static_cast<int>(*chorusVoiceCountParam);
+
+            if (chorusStereoModeChanged.load() && chorusStereoModeParam)   args.stereoMode = static_cast<int>(*chorusStereoModeParam);
+            if (chorusStereoSpreadChanged.load() && chorusStereoSpreadParam) args.stereoSpread = static_cast<float>(*chorusStereoSpreadParam);
+
+            if (chorusMidEnabledChanged.load() && chorusMidEnabledParam)   args.midEnabled = (static_cast<float>(*chorusMidEnabledParam) > 0.5f);
+            if (chorusSideEnabledChanged.load() && chorusSideEnabledParam) args.sideEnabled = (static_cast<float>(*chorusSideEnabledParam) > 0.5f);
+            if (chorusSideGainChanged.load() && chorusSideGainParam)       args.sideGainDb = static_cast<float>(*chorusSideGainParam);
+
+            if (chorusLPFEnabledChanged.load() && chorusLPFEnabledParam)   args.lpfEnabled = (static_cast<float>(*chorusLPFEnabledParam) > 0.5f);
+            if (chorusLPFCutoffChanged.load() && chorusLPFCutoffParam)     args.lpfCutoffHz = static_cast<float>(*chorusLPFCutoffParam);
+            if (chorusHPFEnabledChanged.load() && chorusHPFEnabledParam)   args.hpfEnabled = (static_cast<float>(*chorusHPFEnabledParam) > 0.5f);
+            if (chorusHPFCutoffChanged.load() && chorusHPFCutoffParam)     args.hpfCutoffHz = static_cast<float>(*chorusHPFCutoffParam);
+
+            // Apply parameter updates in one call
+            chorus.updateParameters(args);
+
+            // Update enabled state if changed
+            if (chorusEnabledChanged.load() && chorusEnabledParam) {
+                const bool enabledNow = (*chorusEnabledParam > 0.5f);
+                chorus.setEnabled(enabledNow);
             }
-            
-            float stereoSpread = chorusStereoSpreadParam ? static_cast<float>(*chorusStereoSpreadParam) : 0.5f;
-            bool midEnabled = chorusMidEnabledParam ? (static_cast<float>(*chorusMidEnabledParam) > 0.5f) : true;
-            bool sideEnabled = chorusSideEnabledParam ? (static_cast<float>(*chorusSideEnabledParam) > 0.5f) : true;
-            float sideGain = chorusSideGainParam ? static_cast<float>(*chorusSideGainParam) : 0.0f;
-            
-            // Get filter parameter values
-            bool lpfEnabled = chorusLPFEnabledParam ? (static_cast<float>(*chorusLPFEnabledParam) > 0.5f) : false;
-            float lpfCutoff = chorusLPFCutoffParam ? static_cast<float>(*chorusLPFCutoffParam) : 20000.0f;
-            bool hpfEnabled = chorusHPFEnabledParam ? (static_cast<float>(*chorusHPFEnabledParam) > 0.5f) : false;
-            float hpfCutoff = chorusHPFCutoffParam ? static_cast<float>(*chorusHPFCutoffParam) : 20.0f;
-            
-            // Update chorus parameters only when they've changed
-            if (chorusRateChanged.load() || chorusDepthChanged.load() || chorusMixChanged.load() || 
-                chorusBaseDelayChanged.load() || chorusVoiceCountChanged.load() || chorusEnabledChanged.load() ||
-                chorusStereoModeChanged.load() || chorusStereoSpreadChanged.load() || chorusMidEnabledChanged.load() || 
-                chorusSideEnabledChanged.load() || chorusSideGainChanged.load() || chorusLPFEnabledChanged.load() || 
-                chorusLPFCutoffChanged.load() || chorusHPFEnabledChanged.load() || chorusHPFCutoffChanged.load()) {
-                
-                // Update all chorus parameters in one call
-                chorus.updateParameters(rate, depth, mix, baseDelay, voiceCount,
-                                      stereoMode, stereoSpread,
-                                      midEnabled, sideEnabled, sideGain,
-                                      lpfEnabled, lpfCutoff, hpfEnabled, hpfCutoff);
-                
-                parametersUpdated = true;
-                
-                // Clear all parameter change flags
-                chorusRateChanged.store(false);
-                chorusDepthChanged.store(false);
-                chorusMixChanged.store(false);
-                chorusBaseDelayChanged.store(false);
-                chorusVoiceCountChanged.store(false);
-                chorusEnabledChanged.store(false);
-                chorusStereoModeChanged.store(false);
-                chorusStereoSpreadChanged.store(false);
-                chorusMidEnabledChanged.store(false);
-                chorusSideEnabledChanged.store(false);
-                chorusSideGainChanged.store(false);
-                chorusLPFEnabledChanged.store(false);
-                chorusLPFCutoffChanged.store(false);
-                chorusHPFEnabledChanged.store(false);
-                chorusHPFCutoffChanged.store(false);
-                
-                if (parametersUpdated) {
-                    DBG("PluginProcessor: Chorus parameters updated");
-                }
-            }
-            
-            // Process audio through the multi-voice chorus effect
+
+            // Clear all parameter change flags
+            delayTypeChanged.store(false);
+            chorusRateChanged.store(false);
+            chorusDepthChanged.store(false);
+            chorusMixChanged.store(false);
+            chorusBaseDelayChanged.store(false);
+            chorusVoiceCountChanged.store(false);
+            chorusEnabledChanged.store(false);
+            chorusStereoModeChanged.store(false);
+            chorusStereoSpreadChanged.store(false);
+            chorusMidEnabledChanged.store(false);
+            chorusSideEnabledChanged.store(false);
+            chorusSideGainChanged.store(false);
+            chorusLPFEnabledChanged.store(false);
+            chorusLPFCutoffChanged.store(false);
+            chorusHPFEnabledChanged.store(false);
+            chorusHPFCutoffChanged.store(false);
+
+            DBG("PluginProcessor: Chorus parameters updated");
+        }
+        
+        // Process audio through the multi-voice chorus effect if enabled
+        const bool chorusIsEnabled = chorusEnabledParam ? (*chorusEnabledParam > 0.5f) : true;
+        if (chorusIsEnabled) {
             chorus.processBlock(buffer);
         } else {
             // If chorus is disabled, just pass through the input
-            // (or apply dry/wet mix if needed)
         }
     }
     
