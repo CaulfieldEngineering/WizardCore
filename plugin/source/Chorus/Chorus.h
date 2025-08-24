@@ -4,7 +4,6 @@
 #include <juce_dsp/juce_dsp.h>
 #include "../LFO/LFO.h"
 #include "../DelayLine/DelayLine.h"
-#include "../DelayLine/BBDelayLine/BBDelayLine.h"
 #include <array>
 
 namespace audio_plugin {
@@ -78,7 +77,11 @@ public:
      */
     bool isVoiceEnabled(int voiceIndex) const;
     
-
+    /**
+     * @brief Set the number of active voices
+     * @param numVoices Number of voices to enable (1-5)
+     */
+    void setNumVoices(int numVoices);
     
     /**
      * @brief Get the number of active voices
@@ -315,7 +318,7 @@ private:
     static constexpr float MIN_BASE_DELAY = 10.0f;
     static constexpr float MAX_BASE_DELAY = 100.0f;
     static constexpr float MIN_DELAY_MS = 1.0f;
-    static constexpr float MAX_DELAY_MS = 100.0f;
+    static constexpr float MAX_DELAY_MS = 10.0f;
     static constexpr float MIN_PHASE_OFFSET = 0.0f;
     static constexpr float MAX_PHASE_OFFSET = 360.0f;
 
@@ -356,9 +359,6 @@ private:
     
     // Voice configuration helper methods
     float calculateVoiceMixRatio(int voiceIndex) const;
-    
-    // BBD configuration helper method
-    void configureBBDelayLine(BBDelayLine* bbDelay, float baseDelayMs);
 };
 
 } // namespace audio_plugin
