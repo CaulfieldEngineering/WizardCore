@@ -4,48 +4,67 @@
 
 namespace audio_plugin {
 
+// ============================================================================
+// CONSTRUCTOR & DESTRUCTOR
+// ============================================================================
+
 DigitalDelayLine::DigitalDelayLine()
 {
+    // Initialize with default values
+    // All member variables are initialized in their declarations
 }
 
 DigitalDelayLine::~DigitalDelayLine() = default;
 
+// ============================================================================
+// PREPARATION & SETUP
+// ============================================================================
+
 void DigitalDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, int newNumChannels)
 {
+    // Validate input parameters
     jassert(newSampleRate > 0);
     jassert(maxDelayTimeInSeconds > 0);
     jassert(newNumChannels > 0);
     
-    sampleRate = newSampleRate;
-    numChannels = newNumChannels;
-    maxDelayInSamples = maxDelayTimeInSeconds * sampleRate;
+    // Store system parameters
+    sampleRateHz.store(newSampleRate);
+    numChannels.store(newNumChannels);
+    maxDelayInSamples.store(maxDelayTimeInSeconds * newSampleRate);
     
-    // Add extra samples for interpolation headroom
-    bufferSize = static_cast<int>(std::ceil(maxDelayInSamples)) + 2;
+    // Calculate buffer size with interpolation headroom
+    const int calculatedBufferSize = static_cast<int>(std::ceil(maxDelayInSamples.load())) + 2;
+    bufferSize.store(calculatedBufferSize);
     
     // Allocate per-channel buffers and indices
-    buffers.resize(numChannels);
-    writeIndices.resize(numChannels);
-    readPositions.resize(numChannels);
+    buffers.resize(newNumChannels);
+    writeIndices.resize(newNumChannels);
+    readPositions.resize(newNumChannels);
     
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Initialize each channel's buffer and state
+    for (int ch = 0; ch < newNumChannels; ++ch)
     {
-        buffers[ch].resize(bufferSize);
+        buffers[ch].resize(calculatedBufferSize);
         std::fill(buffers[ch].begin(), buffers[ch].end(), 0.0f);
         writeIndices[ch] = 0;
         readPositions[ch] = 0.0;
     }
     
-    // Initialize smoothing
-    smoothedDelay.reset(sampleRate, DEFAULT_SMOOTHING_TIME);
+    // Initialize smoothing with current config values
+    const double currentSmoothingTime = config.smoothingTimeInSeconds.load();
+    smoothedDelay.reset(newSampleRate, currentSmoothingTime);
     smoothedDelay.setCurrentAndTargetValue(0.0);
-    targetDelayInSamples = 0.0;
+    targetDelayInSamples.store(0.0);
     
     // Mark as prepared
     prepared.store(true);
 }
 
-void DigitalDelayLine::setDelayTime(double delayTimeInSeconds)
+// ============================================================================
+// INDIVIDUAL PARAMETER SETTERS
+// ============================================================================
+
+void DigitalDelayLine::setDelayTimeInSeconds(double delayTimeInSeconds, bool withSmoothing)
 {
     if (!isPrepared())
     {
@@ -53,11 +72,12 @@ void DigitalDelayLine::setDelayTime(double delayTimeInSeconds)
         return;
     }
     
-    double delayInSamples = delayTimeInSeconds * sampleRate;
-    setDelayInSamples(delayInSamples);
+    // Convert to samples and use the sample-based setter
+    const double delayInSamples = delayTimeInSeconds * sampleRateHz.load();
+    setDelayInSamples(delayInSamples, withSmoothing);
 }
 
-void DigitalDelayLine::setDelayInSamples(double delayInSamples)
+void DigitalDelayLine::setDelayInSamples(double delayInSamples, bool withSmoothing)
 {
     if (!isPrepared())
     {
@@ -65,22 +85,24 @@ void DigitalDelayLine::setDelayInSamples(double delayInSamples)
         return;
     }
     
-    // Clamp to valid range
-    targetDelayInSamples = std::clamp(delayInSamples, MIN_DELAY_SAMPLES, maxDelayInSamples);
-    smoothedDelay.setTargetValue(targetDelayInSamples);
-}
-
-void DigitalDelayLine::setDelayTimeImmediate(double delayTimeInSeconds)
-{
-    if (!isPrepared())
-    {
-        jassertfalse;
-        return;
-    }
+    // Clamp to valid range and store in config
+    const double clampedDelay = std::clamp(delayInSamples, MIN_DELAY_SAMPLES, maxDelayInSamples.load());
+    config.delayInSamples.store(clampedDelay);
+    config.delayTimeInSeconds.store(clampedDelay / sampleRateHz.load());
     
-    double delayInSamples = delayTimeInSeconds * sampleRate;
-    targetDelayInSamples = std::clamp(delayInSamples, MIN_DELAY_SAMPLES, maxDelayInSamples);
-    smoothedDelay.setCurrentAndTargetValue(targetDelayInSamples);
+    // Update smoothing target
+    targetDelayInSamples.store(clampedDelay);
+    
+    if (withSmoothing)
+    {
+        // Apply smoothing to prevent clicks
+        smoothedDelay.setTargetValue(clampedDelay);
+    }
+    else
+    {
+        // Apply immediately without smoothing (may cause clicks)
+        smoothedDelay.setCurrentAndTargetValue(clampedDelay);
+    }
 }
 
 void DigitalDelayLine::setSmoothingTime(double rampTimeInSeconds)
@@ -91,20 +113,36 @@ void DigitalDelayLine::setSmoothingTime(double rampTimeInSeconds)
         return;
     }
     
-    smoothedDelay.reset(sampleRate, rampTimeInSeconds);
+    // Store in config and update smoothing
+    config.smoothingTimeInSeconds.store(rampTimeInSeconds);
+    smoothedDelay.reset(sampleRateHz.load(), rampTimeInSeconds);
 }
+
+void DigitalDelayLine::setInterpolationType(InterpolationType type)
+{
+    config.interpolationType.store(type);
+}
+
+void DigitalDelayLine::setEnabled(bool enabled)
+{
+    config.enabled.store(enabled);
+}
+
+// ============================================================================
+// INDIVIDUAL PARAMETER GETTERS
+// ============================================================================
 
 double DigitalDelayLine::getDelayTime() const
 {
-    if (sampleRate <= 0)
+    if (sampleRateHz.load() <= 0)
         return 0.0;
         
-    return targetDelayInSamples / sampleRate;
+    return config.delayTimeInSeconds.load();
 }
 
 double DigitalDelayLine::getDelayInSamples() const
 {
-    return targetDelayInSamples;
+    return config.delayInSamples.load();
 }
 
 double DigitalDelayLine::getCurrentDelayInSamples() const
@@ -112,22 +150,95 @@ double DigitalDelayLine::getCurrentDelayInSamples() const
     return smoothedDelay.getCurrentValue();
 }
 
-void DigitalDelayLine::setInterpolationType(InterpolationType type)
-{
-    interpolationType = type;
-}
-
 DigitalDelayLine::InterpolationType DigitalDelayLine::getInterpolationType() const
 {
-    return interpolationType;
+    return config.interpolationType.load();
 }
+
+double DigitalDelayLine::getSmoothingTime() const
+{
+    return config.smoothingTimeInSeconds.load();
+}
+
+bool DigitalDelayLine::isEnabled() const
+{
+    return config.enabled.load();
+}
+
+bool DigitalDelayLine::isPrepared() const
+{
+    return prepared.load();
+}
+
+double DigitalDelayLine::getMaxDelayTime() const
+{
+    if (sampleRateHz.load() <= 0)
+        return 0.0;
+        
+    return maxDelayInSamples.load() / sampleRateHz.load();
+}
+
+int DigitalDelayLine::getMaxDelayInSamples() const
+{
+    return static_cast<int>(maxDelayInSamples.load());
+}
+
+double DigitalDelayLine::getSampleRate() const
+{
+    return sampleRateHz.load();
+}
+
+// ============================================================================
+// BATCH PARAMETER UPDATES
+// ============================================================================
+
+void DigitalDelayLine::updateParameters(std::optional<double> delayTimeInSeconds,
+                                       std::optional<double> smoothingTimeInSeconds,
+                                       std::optional<InterpolationType> interpolationType,
+                                       std::optional<bool> enabled)
+{
+    // Update delay time if provided
+    if (delayTimeInSeconds.has_value())
+    {
+        setDelayTimeInSeconds(delayTimeInSeconds.value(), true); // Always use smoothing for batch updates
+    }
+    
+    // Update smoothing time if provided
+    if (smoothingTimeInSeconds.has_value())
+    {
+        setSmoothingTime(smoothingTimeInSeconds.value());
+    }
+    
+    // Update interpolation type if provided
+    if (interpolationType.has_value())
+    {
+        setInterpolationType(interpolationType.value());
+    }
+    
+    // Update enabled state if provided
+    if (enabled.has_value())
+    {
+        setEnabled(enabled.value());
+    }
+}
+
+// ============================================================================
+// AUDIO PROCESSING
+// ============================================================================
 
 float DigitalDelayLine::processSample(int channel, float input)
 {
     jassert(isPrepared());
-    jassert(channel >= 0 && channel < numChannels);
+    jassert(channel >= 0 && channel < numChannels.load());
     
-    if (interpolationType == InterpolationType::Linear)
+    // Check if enabled - if not, pass through input unchanged
+    if (!config.enabled.load())
+    {
+        return input;
+    }
+    
+    // Route to appropriate processing method based on interpolation type
+    if (config.interpolationType.load() == InterpolationType::Linear)
         return processSampleLinearInterp(channel, input);
     else
         return processSampleNoInterp(channel, input);
@@ -138,31 +249,31 @@ float DigitalDelayLine::processSampleLinearInterp(int channel, float input)
     auto& buffer = buffers[channel];
     auto& writeIndex = writeIndices[channel];
     
-    // Write input to buffer
+    // Write input to buffer at current write position
     buffer[writeIndex] = input;
     
     // Get the smoothed delay value for this sample
-    double currentDelay = smoothedDelay.getNextValue();
+    const double currentDelay = smoothedDelay.getNextValue();
     
     // Calculate the fractional read position
     double readPos = static_cast<double>(writeIndex) - currentDelay;
     
-    // Wrap the read position
+    // Handle wrap-around for circular buffer
     while (readPos < 0.0)
-        readPos += bufferSize;
+        readPos += bufferSize.load();
     
-    // Get integer and fractional parts
-    int readIndex1 = static_cast<int>(readPos) % bufferSize;
-    int readIndex2 = (readIndex1 + 1) % bufferSize;
-    double fraction = readPos - std::floor(readPos);
+    // Extract integer and fractional parts for interpolation
+    const int readIndex1 = static_cast<int>(readPos) % bufferSize.load();
+    const int readIndex2 = (readIndex1 + 1) % bufferSize.load();
+    const double fraction = readPos - std::floor(readPos);
     
-    // Linear interpolation
-    float sample1 = buffer[readIndex1];
-    float sample2 = buffer[readIndex2];
-    float output = sample1 + fraction * (sample2 - sample1);
+    // Perform linear interpolation
+    const float sample1 = buffer[readIndex1];
+    const float sample2 = buffer[readIndex2];
+    const float output = sample1 + static_cast<float>(fraction * (sample2 - sample1));
     
-    // Advance write index
-    writeIndex = (writeIndex + 1) % bufferSize;
+    // Advance write index with wrap-around
+    writeIndex = (writeIndex + 1) % bufferSize.load();
     
     return output;
 }
@@ -172,35 +283,33 @@ float DigitalDelayLine::processSampleNoInterp(int channel, float input)
     auto& buffer = buffers[channel];
     auto& writeIndex = writeIndices[channel];
     
-    // Write input to buffer
+    // Write input to buffer at current write position
     buffer[writeIndex] = input;
     
-    // Get the smoothed delay value (rounded to nearest sample)
-    int currentDelay = static_cast<int>(std::round(smoothedDelay.getNextValue()));
+    // Get the smoothed delay value and round to nearest sample
+    const int currentDelay = static_cast<int>(std::round(smoothedDelay.getNextValue()));
     
     // Calculate read index with wrap-around
-    int readIndex = (writeIndex - currentDelay + bufferSize) % bufferSize;
+    const int readIndex = (writeIndex - currentDelay + bufferSize.load()) % bufferSize.load();
     
     // Read the delayed sample
-    float output = buffer[readIndex];
+    const float output = buffer[readIndex];
     
-    // Advance write index
-    writeIndex = (writeIndex + 1) % bufferSize;
+    // Advance write index with wrap-around
+    writeIndex = (writeIndex + 1) % bufferSize.load();
     
     return output;
 }
-
-
 
 void DigitalDelayLine::processBlock(juce::AudioBuffer<float>& buffer)
 {
     jassert(isPrepared());
     
     const int numSamples = buffer.getNumSamples();
-    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
+    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels.load());
     
-    // For modulation, delay time might change per sample
-    // The linear interpolation in processSample handles this smoothly
+    // Process each channel independently
+    // Linear interpolation in processSample handles smooth modulation
     for (int ch = 0; ch < channelsToProcess; ++ch)
     {
         float* channelData = buffer.getWritePointer(ch);
@@ -212,102 +321,65 @@ void DigitalDelayLine::processBlock(juce::AudioBuffer<float>& buffer)
     }
 }
 
-void DigitalDelayLine::processBlock(juce::AudioBuffer<float>& buffer, float wetMix)
-{
-    jassert(isPrepared());
-    
-    const int numSamples = buffer.getNumSamples();
-    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
-    float dryMix = 1.0f - wetMix;
-    
-    // For modulation, delay time might change per sample
-    // The linear interpolation in processSample handles this smoothly
-    for (int ch = 0; ch < channelsToProcess; ++ch)
-    {
-        float* channelData = buffer.getWritePointer(ch);
-        
-        for (int i = 0; i < numSamples; ++i)
-        {
-            float input = channelData[i];
-            float delayed = processSample(ch, input);
-            
-            // Mix dry and wet signals
-            channelData[i] = (input * dryMix) + (delayed * wetMix);
-        }
-    }
-}
-
-
+// ============================================================================
+// UTILITY & MAINTENANCE
+// ============================================================================
 
 void DigitalDelayLine::clear()
 {
+    // Clear all delay buffers to silence
     for (auto& buffer : buffers)
     {
         std::fill(buffer.begin(), buffer.end(), 0.0f);
     }
     
+    // Reset buffer indices and positions
     std::fill(writeIndices.begin(), writeIndices.end(), 0);
     std::fill(readPositions.begin(), readPositions.end(), 0.0);
     
-    // Don't reset the delay time - just clear the buffers
+    // Note: Don't reset the delay time - just clear the buffers
 }
 
-bool DigitalDelayLine::isPrepared() const
-{
-    return prepared.load();
-}
+// ============================================================================
+// PRIVATE HELPER METHODS
+// ============================================================================
 
-double DigitalDelayLine::getMaxDelayTime() const
-{
-    if (sampleRate <= 0)
-        return 0.0;
-        
-    return maxDelayInSamples / sampleRate;
-}
-
-int DigitalDelayLine::getMaxDelayInSamples() const
-{
-    return static_cast<int>(maxDelayInSamples);
-}
-
-double DigitalDelayLine::getSampleRate() const
-{
-    return sampleRate;
-}
-
-// Private helper methods
 float DigitalDelayLine::getInterpolatedSample(int channel, double readPosition)
 {
     auto& buffer = buffers[channel];
     
     // Calculate integer and fractional parts
     int readIndex = static_cast<int>(readPosition);
-    double fraction = readPosition - readIndex;
+    const double fraction = readPosition - readIndex;
     
-    // Handle wrap-around
-    readIndex = readIndex % bufferSize;
-    if (readIndex < 0) readIndex += bufferSize;
+    // Handle wrap-around for circular buffer
+    readIndex = readIndex % bufferSize.load();
+    if (readIndex < 0) 
+        readIndex += bufferSize.load();
     
-    int nextIndex = (readIndex + 1) % bufferSize;
+    const int nextIndex = (readIndex + 1) % bufferSize.load();
     
-    // Linear interpolation
-    float sample1 = buffer[readIndex];
-    float sample2 = buffer[nextIndex];
+    // Perform linear interpolation
+    const float sample1 = buffer[readIndex];
+    const float sample2 = buffer[nextIndex];
     
-    return sample1 + (sample2 - sample1) * static_cast<float>(fraction);
+    return sample1 + static_cast<float>((sample2 - sample1) * fraction);
 }
 
 void DigitalDelayLine::updateReadPositions()
 {
-    double currentDelay = smoothedDelay.getCurrentValue();
+    const double currentDelay = smoothedDelay.getCurrentValue();
     
-    for (int ch = 0; ch < numChannels; ++ch) {
+    // Update read positions for all channels
+    for (int ch = 0; ch < numChannels.load(); ++ch) 
+    {
         // Calculate read position relative to write position
         double readPos = static_cast<double>(writeIndices[ch]) - currentDelay;
         
         // Handle wrap-around
-        while (readPos < 0) {
-            readPos += bufferSize;
+        while (readPos < 0) 
+        {
+            readPos += bufferSize.load();
         }
         
         readPositions[ch] = readPos;

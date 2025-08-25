@@ -15,7 +15,11 @@ alwaysApply: true
   
 - Use JUCE native methods, constants and practices where applicable. 
 
-- All modules should have individual setters/getters to update each parameter individually, as well as a single updateParameters method to pass all arguments in one go, with any one of the arguments being optional.
+- DSP Methods should favor "Block Processing" (versus Sample Processing) when possible.
+
+- Place Public methods above Private methods in header declarations.
+
+- All modules should have individual setters/getters to update each parameter individually, as well as a single updateParameters method to pass all arguments in one go.
 
 - Maintain modularity and DRY principles.  When parameters are assigned internal to a class, they should use the designated internal setters/getters rather than additional longform code, when possible.
 

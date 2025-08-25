@@ -1,15 +1,25 @@
 ﻿#include "BBDelayLine.h"
+#include "../DigitalDelayLine/DigitalDelayLine.h"
 #include <algorithm>
 #include <cmath>
 
-namespace audio_plugin {
+namespace audio_plugin
+{
+
+// ============================================================================
+// CONSTRUCTOR & DESTRUCTOR
+// ============================================================================
 
 BBDelayLine::BBDelayLine()
 {
-    // Initialize smoothed clock frequency
+    // Initialize smoothed clock frequency with default values
     smoothedClockFreq.reset(44100.0, DEFAULT_SMOOTHING_TIME);
     smoothedClockFreq.setCurrentAndTargetValue(44100.0);
 }
+
+// ============================================================================
+// PREPARATION & SETUP
+// ============================================================================
 
 void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, int newNumChannels)
 {
@@ -17,22 +27,23 @@ void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, in
     jassert(maxDelayTimeInSeconds > 0);
     jassert(newNumChannels > 0);
     
-    sampleRate = newSampleRate;
-    numChannels = newNumChannels;
-    maxDelayTimeSeconds = maxDelayTimeInSeconds;
+    // Store system parameters
+    sampleRateHz.store(newSampleRate);
+    numChannels.store(newNumChannels);
+    maxDelayTimeSeconds.store(maxDelayTimeInSeconds);
     
     // Initialize smoothed clock frequency with new sample rate
-    smoothedClockFreq.reset(sampleRate, DEFAULT_SMOOTHING_TIME);
+    smoothedClockFreq.reset(newSampleRate, config.smoothingTimeInSeconds.load());
     
     // Allocate stage buffers for each channel
-    stageBuffers.resize(numChannels);
-    clockAccumulators.resize(numChannels);
-    inputFilters.resize(numChannels);
-    outputFilters.resize(numChannels);
+    stageBuffers.resize(newNumChannels);
+    clockAccumulators.resize(newNumChannels);
+    inputFilters.resize(newNumChannels);
+    outputFilters.resize(newNumChannels);
     
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (int ch = 0; ch < newNumChannels; ++ch)
     {
-        stageBuffers[ch].resize(numStages);
+        stageBuffers[ch].resize(config.stageCount.load());
         std::fill(stageBuffers[ch].begin(), stageBuffers[ch].end(), 0.0f);
         clockAccumulators[ch] = 0.0;
         inputFilters[ch].reset();
@@ -41,7 +52,7 @@ void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, in
     
     // Prepare internal core delay to maintain stable timing
     coreDelay = std::make_unique<DigitalDelayLine>();
-    coreDelay->prepare(sampleRate, maxDelayTimeInSeconds, numChannels);
+    coreDelay->prepare(newSampleRate, maxDelayTimeInSeconds, newNumChannels);
     coreDelay->setInterpolationType(DelayLine::InterpolationType::Linear);
     
     // Set initial delay time and update clock frequency
@@ -51,28 +62,36 @@ void BBDelayLine::prepare(double newSampleRate, double maxDelayTimeInSeconds, in
     prepared.store(true);
     
     // Now that we're prepared, apply any stored delay time
-    if (targetDelayTimeSeconds > 0.0)
+    if (config.delayTimeInSeconds.load() > 0.0)
     {
         updateClockFrequency();
-        coreDelay->setDelayTime(targetDelayTimeSeconds);
+        coreDelay->setDelayTimeInSeconds(config.delayTimeInSeconds.load(), true);
     }
 }
 
-void BBDelayLine::setDelayTime(double delayTimeInSeconds)
+// ============================================================================
+// DELAYLINE INTERFACE IMPLEMENTATION
+// ============================================================================
+
+void BBDelayLine::setDelayTimeInSeconds(double delayTimeInSeconds, bool withSmoothing)
 {
     // Store the target delay time even if not prepared yet
     // It will be applied when prepare() is called
-    targetDelayTimeSeconds = std::clamp(delayTimeInSeconds, MIN_DELAY_TIME, maxDelayTimeSeconds);
+    const double clampedDelay = std::clamp(delayTimeInSeconds, MIN_DELAY_TIME, maxDelayTimeSeconds.load());
+    config.delayTimeInSeconds.store(clampedDelay);
     
     // Only update clock frequency if prepared
     if (isPrepared())
     {
         updateClockFrequency();
-        if (coreDelay) coreDelay->setDelayTime(targetDelayTimeSeconds);
+        if (coreDelay) 
+        {
+            coreDelay->setDelayTimeInSeconds(clampedDelay, withSmoothing);
+        }
     }
 }
 
-void BBDelayLine::setDelayInSamples(double delayInSamples)
+void BBDelayLine::setDelayInSamples(double delayInSamples, bool withSmoothing)
 {
     if (!isPrepared())
     {
@@ -80,25 +99,8 @@ void BBDelayLine::setDelayInSamples(double delayInSamples)
         return;
     }
     
-    double delayTimeInSeconds = delayInSamples / sampleRate;
-    setDelayTime(delayTimeInSeconds);
-}
-
-void BBDelayLine::setDelayTimeImmediate(double delayTimeInSeconds)
-{
-    if (!isPrepared())
-    {
-        jassertfalse;
-        return;
-    }
-    
-    targetDelayTimeSeconds = std::clamp(delayTimeInSeconds, MIN_DELAY_TIME, maxDelayTimeSeconds);
-    updateClockFrequency();
-    
-    // Set clock frequency immediately without smoothing
-    smoothedClockFreq.setCurrentAndTargetValue(currentClockFreq);
-    updateFilterCutoffs();
-    if (coreDelay) coreDelay->setDelayTimeImmediate(targetDelayTimeSeconds);
+    const double delayTimeInSeconds = delayInSamples / sampleRateHz.load();
+    setDelayTimeInSeconds(delayTimeInSeconds, withSmoothing);
 }
 
 void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
@@ -109,31 +111,40 @@ void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
         return;
     }
     
-    smoothedClockFreq.reset(sampleRate, rampTimeInSeconds);
-    if (coreDelay) coreDelay->setSmoothingTime(rampTimeInSeconds);
+    config.smoothingTimeInSeconds.store(rampTimeInSeconds);
+    smoothedClockFreq.reset(sampleRateHz.load(), rampTimeInSeconds);
+    
+    if (coreDelay) 
+    {
+        coreDelay->setSmoothingTime(rampTimeInSeconds);
+    }
 }
 
 double BBDelayLine::getDelayTime() const
 {
-    return targetDelayTimeSeconds;
+    return config.delayTimeInSeconds.load();
 }
 
 double BBDelayLine::getDelayInSamples() const
 {
-    return targetDelayTimeSeconds * sampleRate;
+    return config.delayTimeInSeconds.load() * sampleRateHz.load();
 }
 
 double BBDelayLine::getCurrentDelayInSamples() const
 {
     if (coreDelay && coreDelay->isPrepared())
+    {
         return coreDelay->getCurrentDelayInSamples();
+    }
     
     // Fallback: Calculate current delay based on smoothed clock frequency
     if (smoothedClockFreq.getCurrentValue() <= 0.0)
+    {
         return 0.0;
+    }
         
-    double currentDelayTime = static_cast<double>(numStages) / smoothedClockFreq.getCurrentValue();
-    return currentDelayTime * sampleRate;
+    const double currentDelayTime = static_cast<double>(config.stageCount.load()) / smoothedClockFreq.getCurrentValue();
+    return currentDelayTime * sampleRateHz.load();
 }
 
 void BBDelayLine::setInterpolationType(InterpolationType type)
@@ -147,13 +158,24 @@ DelayLine::InterpolationType BBDelayLine::getInterpolationType() const
     return InterpolationType::None;  // BBD is always discrete
 }
 
+// ============================================================================
+// AUDIO PROCESSING
+// ============================================================================
+
 float BBDelayLine::processSample(int channel, float input)
 {
     jassert(isPrepared());
-    jassert(channel >= 0 && channel < numChannels);
+    jassert(channel >= 0 && channel < numChannels.load());
+    
+    // Early return if disabled
+    if (!config.enabled.load())
+    {
+        return input;
+    }
     
     // Apply input filtering if enabled
-    float filteredInput = filteringEnabled ? inputFilters[channel].processSingleSampleRaw(input) : input;
+    float filteredInput = config.filteringEnabled.load() ? 
+        inputFilters[channel].processSingleSampleRaw(input) : input;
     
     // Use stable timing core delay to compute delayed value at current delay setting
     float delayedCore = coreDelay ? coreDelay->processSample(channel, filteredInput) : filteredInput;
@@ -162,11 +184,13 @@ float BBDelayLine::processSample(int channel, float input)
     // Approximate cumulative droop over N stages by N small one-tap leaks on each sample
     // Use a compact approximation: y = delayedCore * pow(droopFactor, numStages * 0.25f)
     // (0.25 reduces over-attenuation compared to full-stage cascade)
-    const float droopGain = std::pow(droopFactor, static_cast<float>(numStages) * 0.25f);
+    const float droopGain = std::pow(config.droopFactor.load(), 
+        static_cast<float>(config.stageCount.load()) * 0.25f);
     float output = delayedCore * droopGain;
     
     // Apply output filtering if enabled
-    float filteredOutput = filteringEnabled ? outputFilters[channel].processSingleSampleRaw(output) : output;
+    float filteredOutput = config.filteringEnabled.load() ? 
+        outputFilters[channel].processSingleSampleRaw(output) : output;
     
     return filteredOutput;
 }
@@ -176,7 +200,7 @@ void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer)
     jassert(isPrepared());
     
     const int numSamples = buffer.getNumSamples();
-    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
+    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels.load());
     
     for (int ch = 0; ch < channelsToProcess; ++ch)
     {
@@ -194,8 +218,8 @@ void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer, float wetMix)
     jassert(isPrepared());
     
     const int numSamples = buffer.getNumSamples();
-    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels);
-    float dryMix = 1.0f - wetMix;
+    const int channelsToProcess = std::min(buffer.getNumChannels(), numChannels.load());
+    const float dryMix = 1.0f - wetMix;
     
     for (int ch = 0; ch < channelsToProcess; ++ch)
     {
@@ -203,14 +227,18 @@ void BBDelayLine::processBlock(juce::AudioBuffer<float>& buffer, float wetMix)
         
         for (int i = 0; i < numSamples; ++i)
         {
-            float input = channelData[i];
-            float delayed = processSample(ch, input);
+            const float input = channelData[i];
+            const float delayed = processSample(ch, input);
             
             // Mix dry and wet signals
             channelData[i] = (input * dryMix) + (delayed * wetMix);
         }
     }
 }
+
+// ============================================================================
+// STATE MANAGEMENT
+// ============================================================================
 
 void BBDelayLine::clear()
 {
@@ -222,11 +250,19 @@ void BBDelayLine::clear()
     std::fill(clockAccumulators.begin(), clockAccumulators.end(), 0.0);
     
     for (auto& filter : inputFilters)
+    {
         filter.reset();
-    for (auto& filter : outputFilters)
-        filter.reset();
+    }
     
-    if (coreDelay) coreDelay->clear();
+    for (auto& filter : outputFilters)
+    {
+        filter.reset();
+    }
+    
+    if (coreDelay) 
+    {
+        coreDelay->clear();
+    }
 }
 
 bool BBDelayLine::isPrepared() const
@@ -236,34 +272,37 @@ bool BBDelayLine::isPrepared() const
 
 double BBDelayLine::getMaxDelayTime() const
 {
-    return maxDelayTimeSeconds;
+    return maxDelayTimeSeconds.load();
 }
 
 int BBDelayLine::getMaxDelayInSamples() const
 {
-    return static_cast<int>(maxDelayTimeSeconds * sampleRate);
+    return static_cast<int>(maxDelayTimeSeconds.load() * sampleRateHz.load());
 }
 
 double BBDelayLine::getSampleRate() const
 {
-    return sampleRate;
+    return sampleRateHz.load();
 }
 
-// BBD-specific parameter setters
+// ============================================================================
+// INDIVIDUAL PARAMETER SETTERS
+// ============================================================================
+
 void BBDelayLine::setStageCount(int stages)
 {
-    int newStages = std::clamp(stages, MIN_STAGES, MAX_STAGES);
+    const int newStages = std::clamp(stages, MIN_STAGES, MAX_STAGES);
     
-    if (newStages != numStages)
+    if (newStages != config.stageCount.load())
     {
-        numStages = newStages;
+        config.stageCount.store(newStages);
         
         // Reallocate stage buffers if already prepared
         if (isPrepared())
         {
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < numChannels.load(); ++ch)
             {
-                stageBuffers[ch].resize(numStages);
+                stageBuffers[ch].resize(newStages);
                 std::fill(stageBuffers[ch].begin(), stageBuffers[ch].end(), 0.0f);
             }
             
@@ -274,12 +313,13 @@ void BBDelayLine::setStageCount(int stages)
 
 void BBDelayLine::setDroopFactor(float droop)
 {
-    droopFactor = std::clamp(droop, 0.0f, 1.0f);
+    const float clampedDroop = std::clamp(droop, 0.0f, 1.0f);
+    config.droopFactor.store(clampedDroop);
 }
 
 void BBDelayLine::setFilteringEnabled(bool enabled)
 {
-    filteringEnabled = enabled;
+    config.filteringEnabled.store(enabled);
     
     if (isPrepared())
     {
@@ -287,39 +327,64 @@ void BBDelayLine::setFilteringEnabled(bool enabled)
     }
 }
 
-// Private helper methods
+void BBDelayLine::setEnabled(bool enabled)
+{
+    config.enabled.store(enabled);
+}
+
+// ============================================================================
+// BATCH PARAMETER UPDATES
+// ============================================================================
+
+void BBDelayLine::updateParameters(int stages, float droop, bool filtering, bool enabled)
+{
+    setStageCount(stages);
+    setDroopFactor(droop);
+    setFilteringEnabled(filtering);
+    setEnabled(enabled);
+}
+
+// ============================================================================
+// PRIVATE HELPER METHODS
+// ============================================================================
+
 void BBDelayLine::updateClockFrequency()
 {
     // Calculate required clock frequency to achieve target delay time
     // Clock frequency = numStages / targetDelayTime
-    if (targetDelayTimeSeconds > 0.0)
+    const double targetDelay = config.delayTimeInSeconds.load();
+    
+    if (targetDelay > 0.0)
     {
-        currentClockFreq = static_cast<double>(numStages) / targetDelayTimeSeconds;
+        const double newClockFreq = static_cast<double>(config.stageCount.load()) / targetDelay;
         
         // Clamp to reasonable range (avoid aliasing and ensure stability)
-        double maxClockFreq = sampleRate * 0.4;  // Nyquist-safe
-        double minClockFreq = static_cast<double>(numStages) / maxDelayTimeSeconds;
+        const double maxClockFreq = sampleRateHz.load() * 0.4;  // Nyquist-safe
+        const double minClockFreq = static_cast<double>(config.stageCount.load()) / maxDelayTimeSeconds.load();
         
-        currentClockFreq = std::clamp(currentClockFreq, minClockFreq, maxClockFreq);
+        const double clampedClockFreq = std::clamp(newClockFreq, minClockFreq, maxClockFreq);
+        currentClockFreq.store(clampedClockFreq);
         
         // Set the smoothed target
-        smoothedClockFreq.setTargetValue(currentClockFreq);
+        smoothedClockFreq.setTargetValue(clampedClockFreq);
     }
 }
 
 void BBDelayLine::updateFilterCutoffs()
 {
-    if (!filteringEnabled)
+    if (!config.filteringEnabled.load())
+    {
         return;
+    }
         
     // Set LPF cutoff based on the effective BBD bandwidth (~ f_clk / 2), but
     // relax slightly to preserve articulation; add a lower bound to avoid over-muffling.
     const double currentClock = smoothedClockFreq.getCurrentValue();
     const double targetCutoffHz = std::clamp(currentClock * 0.35, 3500.0, 11000.0);
     
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (int ch = 0; ch < numChannels.load(); ++ch)
     {
-        auto lpf = juce::IIRCoefficients::makeLowPass(sampleRate, targetCutoffHz, 0.707f);
+        auto lpf = juce::IIRCoefficients::makeLowPass(sampleRateHz.load(), targetCutoffHz, 0.707f);
         inputFilters[ch].setCoefficients(lpf);
         outputFilters[ch].setCoefficients(lpf);
     }
@@ -331,10 +396,10 @@ float BBDelayLine::processStages(int channel, float input)
     auto& clockAccum = clockAccumulators[channel];
     
     // Get current smoothed clock frequency
-    double clockFreq = smoothedClockFreq.getNextValue();
+    const double clockFreq = smoothedClockFreq.getNextValue();
     
     // Calculate clock increment per sample
-    double clockIncrement = clockFreq / sampleRate;
+    const double clockIncrement = clockFreq / sampleRateHz.load();
     
     // Advance clock accumulator
     clockAccum += clockIncrement;
@@ -345,10 +410,10 @@ float BBDelayLine::processStages(int channel, float input)
         clockAccum -= 1.0;
         
         // Shift all stages (from last to first)
-        for (int stage = numStages - 1; stage > 0; --stage)
+        for (int stage = config.stageCount.load() - 1; stage > 0; --stage)
         {
             // Apply droop/leak during transfer
-            stages[stage] = stages[stage - 1] * droopFactor;
+            stages[stage] = stages[stage - 1] * config.droopFactor.load();
         }
         
         // Input goes to first stage
@@ -356,7 +421,7 @@ float BBDelayLine::processStages(int channel, float input)
     }
     
     // Output comes from the last stage
-    return stages[numStages - 1];
+    return stages[config.stageCount.load() - 1];
 }
 
 void BBDelayLine::resetStages()

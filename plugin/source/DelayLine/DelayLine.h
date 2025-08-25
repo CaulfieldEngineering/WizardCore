@@ -67,7 +67,7 @@ public:
      * modulation effects (chorus, flanger, etc.) without zipper noise.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    virtual void setDelayTime(double delayTimeInSeconds) = 0;
+    virtual void setDelayTimeInSeconds(double delayTimeInSeconds, bool withSmoothing = true) = 0;
 
     /**
      * @brief Set the delay time with sample-accurate precision
@@ -77,17 +77,9 @@ public:
      * this supports smooth modulation at audio rate.
      * The delay time change is automatically smoothed to prevent clicks.
      */
-    virtual void setDelayInSamples(double delayInSamples) = 0;
+    virtual void setDelayInSamples(double delayInSamples, bool withSmoothing = true) = 0;
     
-    /**
-     * @brief Set the delay time immediately without smoothing
-     * @param delayTimeInSeconds Delay time in seconds
-     * 
-     * Bypasses smoothing for instant changes. Use with caution as this
-     * may cause clicks if called during playback.
-     */
-    virtual void setDelayTimeImmediate(double delayTimeInSeconds) = 0;
-    
+
     /**
      * @brief Set the smoothing ramp time for delay changes
      * @param rampTimeInSeconds Time in seconds for delay changes to ramp
@@ -157,18 +149,6 @@ public:
      * Thread Safety: Safe to call from different threads for different channels
      */
     virtual void processBlock(juce::AudioBuffer<float>& buffer) = 0;
-    
-    /**
-     * @brief Process an audio block with wet/dry mixing
-     * @param buffer The audio buffer to process
-     * @param wetMix The wet signal mix amount (0.0 = dry only, 1.0 = wet only)
-     * 
-     * Processes the buffer and mixes the delayed signal with the original.
-     * Useful for effects where you want to blend the delayed and original signals.
-     * 
-     * Thread Safety: Safe to call from different threads for different channels
-     */
-    virtual void processBlock(juce::AudioBuffer<float>& buffer, float wetMix) = 0;
     
     /**
      * @brief Clear all delay buffers and reset state

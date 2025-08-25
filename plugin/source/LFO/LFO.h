@@ -99,11 +99,15 @@ public:
     };
 
     // ============================================================================
-    // CONFIGURATION CONSTANTS
+    // CONFIGURATION STRUCT
     // ============================================================================
     
     /**
-     * @brief Configuration values for key LFO parameters
+     * @brief Configuration struct containing all LFO parameters of sonic/usable interest
+     * 
+     * This struct contains the parameters that define how the LFO sounds and behaves.
+     * It is public so external code can access the parameter structure for debugging
+     * and monitoring, but the actual config instance remains private.
      */
     struct Config {
         std::atomic<double> frequencyHz{1.0};           ///< LFO frequency in Hz
@@ -445,6 +449,8 @@ private:
     void generateTriangleWave();
     void generateHumpDownWave();
     void generateHumpUpWave();
+
+
 
     // ============================================================================
     // PRIVATE MEMBER VARIABLES
