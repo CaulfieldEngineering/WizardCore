@@ -152,7 +152,7 @@ public:
      * @brief Get the current delay time in seconds
      * @return Current delay time in seconds
      */
-    virtual double getDelayTime() const override;
+    virtual double getDelayTimeInSeconds() const override;
 
     /**
      * @brief Get the current delay time in samples

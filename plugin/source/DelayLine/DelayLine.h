@@ -96,7 +96,7 @@ public:
      * @brief Get the current delay time in seconds
      * @return Current delay time in seconds
      */
-    virtual double getDelayTime() const = 0;
+    virtual double getDelayTimeInSeconds() const = 0;
     
     /**
      * @brief Get the current delay time in samples

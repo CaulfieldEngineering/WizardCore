@@ -109,7 +109,7 @@ public:
      * @brief Get the current delay time in seconds
      * @return Current delay time in seconds
      */
-    double getDelayTime() const override;
+    double getDelayTimeInSeconds() const override;
     
     /**
      * @brief Get the current delay time in samples
@@ -240,12 +240,6 @@ public:
      * @return true if the delay line is active
      */
     bool isEnabled() const { return config.enabled.load(); }
-    
-    /**
-     * @brief Get the current delay time in seconds
-     * @return Current delay time in seconds
-     */
-    double getDelayTimeInSeconds() const { return config.delayTimeInSeconds.load(); }
     
     /**
      * @brief Get the current smoothing time in seconds

@@ -11,47 +11,106 @@ namespace audio_plugin {
 /**
  * @brief A multi-voice chorus effect using modulated delay lines
  * 
- * This class provides a chorus effect with up to configurable number of modulated delay lines
+ * This class provides a chorus effect with configurable number of modulated delay lines
  * mixed with the dry signal. Each voice has individual LFO objects that control
  * modulation parameters (rate, depth, phase offset) directly, plus mix and base delay.
  * 
  * Thread Safety: Thread-safe for audio processing
  * Memory: Allocates delay buffers and LFO wavetables during prepare()
- * 
- * Usage Example:
- * @code
- * Chorus chorus(3);  // Create chorus with 3 voices maximum
- * chorus.prepare(48000, 2);  // 48kHz, stereo
- * chorus.setVoiceEnabled(0, true);  // Enable first voice
- * 
- * // LFO parameters are now controlled directly via LFO objects:
- * chorus.getVoiceLeftLFO(0)->setFrequency(1.0);     // 1 Hz modulation for voice 0
- * chorus.getVoiceLeftLFO(0)->setDepth(0.5f);        // 50% modulation depth for voice 0
- * chorus.getVoiceLeftLFO(0)->setPhaseOffset(0.0);   // No phase offset for voice 0
- * 
- * chorus.setVoiceMix(0, 0.7);       // 70% wet, 30% dry for voice 0
- * chorus.setVoiceBaseDelay(0, 30.0); // 30ms base delay for voice 0
- * 
- * // Switch between different delay types
- * chorus.setDelayType(DelayType::BBDelay);     // Use BBD delay for vintage character
- * chorus.setDelayType(DelayType::DigitalDelay); // Use clean delay for pristine sound
- * 
- * chorus.processBlock(audioBuffer);
- * @endcode
  */
 class Chorus {
 public:
+    // ============================================================================
+    // ENUMS AND CONSTANTS
+    // ============================================================================
+    
+    enum class PanningMode {
+        Mono,           // Original mono behavior
+        Stereo,         // Stereo phase offset mode
+        MidSide         // Mid-Side processing mode
+    };
+
+    // ============================================================================
+    // CONSTANTS
+    // ============================================================================
+    
+    static constexpr int DEFAULT_MAX_VOICES = 5;
+    static constexpr int MIN_MAX_VOICES = 1;
+    static constexpr int MAX_MAX_VOICES = 16;
+    static constexpr float MIN_RATE = 0.1f;
+    static constexpr float MAX_RATE = 2.0f;
+    static constexpr float MIN_DEPTH = 0.0f;
+    static constexpr float MAX_DEPTH = 1.0f;
+    static constexpr float MIN_MIX = 0.0f;
+    static constexpr float MAX_MIX = 1.0f;
+    static constexpr float MIN_BASE_DELAY = 10.0f;
+    static constexpr float MAX_BASE_DELAY = 100.0f;
+    static constexpr float MIN_DELAY_MS = 1.0f;
+    static constexpr float MAX_DELAY_MS = 10.0f;
+    static constexpr float MIN_PHASE_OFFSET = 0.0f;
+    static constexpr float MAX_PHASE_OFFSET = 360.0f;
+    static constexpr float MIN_VOICE_ATTENUATION = -24.0f;  // Maximum attenuation per voice in dB
+    static constexpr float MAX_VOICE_ATTENUATION = 0.0f;    // No attenuation per voice in dB
+    static constexpr float MIN_MASTER_VOICE_LEVEL = -20.0f; // Maximum master voice attenuation in dB
+    static constexpr float MAX_MASTER_VOICE_LEVEL = 6.0f;   // Maximum master voice boost in dB
+
+    // ============================================================================
+    // CONFIGURATION STRUCT
+    // ============================================================================
+    
+    /**
+     * @brief Sonic parameters that define the module's behavior and character
+     * 
+     * NOTE: This struct is for READ-ONLY ACCESS and parameter overview.
+     * All modifications must use the dedicated setter methods.
+     */
+    struct Config {
+        // Core sonic parameters
+        std::atomic<bool> enabled{true};                    ///< Enable/disable entire chorus effect
+        std::atomic<int> numActiveVoices{1};               ///< Number of currently active voices
+        std::atomic<float> rate{1.0f};                     ///< Global LFO modulation rate in Hz
+        std::atomic<float> depth{0.5f};                    ///< Global modulation depth [0.0, 1.0]
+        std::atomic<float> mix{0.7f};                      ///< Global dry/wet mix [0.0, 1.0]
+        std::atomic<float> baseDelay{30.0f};               ///< Global base delay time in milliseconds
+        std::atomic<float> voiceAttenuationDb{0.0f};      ///< Voice attenuation per voice in dB (negative = quieter)
+        std::atomic<float> masterVoiceLevelDb{-3.0f};      ///< Master voice level attenuation in dB (negative = quieter)
+        
+        // Stereo processing parameters
+        std::atomic<PanningMode> panningMode{PanningMode::Mono}; ///< Current stereo processing mode
+        std::atomic<float> stereoSpread{0.5f};             ///< Stereo spread amount [0.0, 1.0]
+        std::atomic<bool> midEnabled{true};                ///< Enable mid channel processing
+        std::atomic<bool> sideEnabled{true};               ///< Enable side channel processing
+        std::atomic<float> sideGainDb{0.0f};              ///< Side channel gain in dB [-20, +20]
+        
+        // Filter parameters
+        std::atomic<bool> lpfEnabled{false};               ///< Enable low-pass filtering
+        std::atomic<bool> hpfEnabled{false};               ///< Enable high-pass filtering
+        std::atomic<float> lpfCutoff{20000.0f};            ///< LPF cutoff frequency in Hz
+        std::atomic<float> hpfCutoff{20.0f};               ///< HPF cutoff frequency in Hz
+        
+        // Delay type parameter
+        std::atomic<DelayType> delayType{DelayType::BBDelay}; ///< Current delay line type
+    };
+
+    // ============================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    // ============================================================================
+    
     /**
      * @brief Constructor with configurable maximum voices
      * @param maxVoices Maximum number of voices (1-16, default 5)
      */
-    explicit Chorus(int maxVoices = 10);
+    explicit Chorus(int maxVoices = 5);
     
     /**
      * @brief Destructor
      */
     ~Chorus();
 
+    // ============================================================================
+    // PUBLIC INTERFACE
+    // ============================================================================
+    
     /**
      * @brief Prepare the chorus for processing
      * @param sampleRate The sample rate in Hz
@@ -61,115 +120,6 @@ public:
      * buffers and resets all state.
      */
     void prepare(double sampleRate, int numChannels);
-
-    // Voice management
-    /**
-     * @brief Enable or disable a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param enabled Whether the voice should be enabled
-     */
-    void setVoiceEnabled(int voiceIndex, bool enabled);
-    
-    /**
-     * @brief Check if a voice is enabled
-     * @param voiceIndex Voice index (0-4)
-     * @return True if the voice is enabled
-     */
-    bool isVoiceEnabled(int voiceIndex) const;
-    
-    /**
-     * @brief Set the number of active voices
-     * @param numVoices Number of voices to enable (1-5)
-     */
-    void setNumVoices(int numVoices);
-    
-    /**
-     * @brief Get the number of active voices
-     * @return Number of currently enabled voices
-     */
-    int getNumVoices() const;
-    
-    /**
-     * @brief Get the maximum number of voices supported by this instance
-     * @return Maximum number of voices
-     */
-    int getMaxVoices() const;
-    
-    /**
-     * @brief Get direct access to a voice's LFO instance
-     * @param voiceIndex Voice index (0-4)
-     * @return Pointer to the LFO instance, or nullptr if invalid index
-     */
-    LFO* getVoiceLFO(int voiceIndex);
-    
-    /**
-     * @brief Get direct access to a voice's left/mid LFO instance
-     * @param voiceIndex Voice index (0-4)
-     * @return Pointer to the left/mid LFO instance, or nullptr if invalid index
-     */
-    LFO* getVoiceLeftLFO(int voiceIndex);
-    
-    /**
-     * @brief Get direct access to a voice's right/side LFO instance
-     * @param voiceIndex Voice index (0-4)
-     * @return Pointer to the right/side LFO instance, or nullptr if invalid index
-     */
-    LFO* getVoiceRightLFO(int voiceIndex);
-    
-    /**
-     * @brief Get direct access to a voice's delay line instance
-     * @param voiceIndex Voice index (0-4)
-     * @return Pointer to the DelayLine instance, or nullptr if invalid index
-     */
-    DelayLine* getVoiceDelayLine(int voiceIndex);
-
-    // Per-voice parameter setters
-    // Note: LFO parameters (rate, depth, phase) are now controlled directly via LFO objects
-    // Use: chorus.getVoiceLeftLFO(index)->setFrequency(), setDepth(), setPhaseOffset(), etc.
-
-    /**
-     * @brief Set the dry/wet mix for a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param mix Mix between dry (0.0) and wet (1.0) signal
-     */
-    void setVoiceMix(int voiceIndex, float mix);
-
-    /**
-     * @brief Set the base delay time for a specific voice
-     * @param voiceIndex Voice index (0-4)
-     * @param delayMs Base delay time in milliseconds (20-40ms typical for chorus)
-     */
-    void setVoiceBaseDelay(int voiceIndex, float delayMs);
-
-    // Note: Phase offset now controlled directly via LFO object
-    // Use: chorus.getVoiceLeftLFO(index)->setPhaseOffset(radians)
-
-    // Independent LFO control methods removed - LFOs are now always independent
-    // Access LFO parameters directly via:
-    // - getVoiceLeftLFO(index)->setFrequency(), setDepth(), setPhaseOffset()
-    // - getVoiceRightLFO(index)->setFrequency(), setDepth(), setPhaseOffset()
-
-    // Global parameter setters (affect all voices)
-    // Note: LFO parameters (rate, depth) are now controlled directly via individual LFO objects
-    // To set all voices: for(int i=0; i<maxVoices; ++i) getVoiceLeftLFO(i)->setFrequency(rate);
-
-    /**
-     * @brief Set the dry/wet mix for all voices
-     * @param mix Mix between dry (0.0) and wet (1.0) signal
-     */
-    void setMix(float mix);
-
-    /**
-     * @brief Set the base delay time for all voices
-     * @param delayMs Base delay time in milliseconds (20-40ms typical for chorus)
-     */
-    void setBaseDelay(float delayMs);
-    
-    /**
-     * @brief Enable or disable the entire chorus effect
-     * @param enabled Whether the chorus should be enabled
-     */
-    void setEnabled(bool enabled);
 
     /**
      * @brief Process a block of audio
@@ -187,178 +137,201 @@ public:
      */
     void clear();
 
-    /**
-     * @brief Check if the chorus is prepared and ready to process
-     * @return True if prepare() has been called and the chorus is ready
-     */
-    bool isPrepared() const;
+    // ============================================================================
+    // ACCESS TO SONIC CONFIGURATION (READ-ONLY)
+    // ============================================================================
     
     /**
-     * @brief Switch between different delay types for all voices
-     * @param delayType The type of delay to use (DigitalDelay or BBDelay)
+     * @brief Get access to sonic configuration for debugging/monitoring (READ-ONLY)
+     * @return Const reference to the Config struct containing all sonic parameters
      */
-    void setDelayType(DelayType delayType);
+    const Config& getConfig() const { return config; }
 
-    // Getters (all thread-safe)
-    // Note: getRate() and getDepth() removed - access via individual LFO objects
-    // Use: getVoiceLeftLFO(index)->getFrequency() and getVoiceLeftLFO(index)->getDepth()
-    float getMix() const { return mix.load(); }
-    float getBaseDelay() const { return baseDelay.load(); }
-    double getSampleRate() const { return sampleRate.load(); }
-    bool isEnabled() const { return enabled.load(); }
-    DelayType getDelayType() const { return currentDelayType.load(); }
+    // ============================================================================
+    // INDIVIDUAL PARAMETER SETTERS
+    // ============================================================================
     
-    // Per-voice getters
-    float getVoiceRate(int voiceIndex) const;
-    float getVoiceDepth(int voiceIndex) const;
-    float getVoiceMix(int voiceIndex) const;
-    float getVoiceBaseDelay(int voiceIndex) const;
-    float getVoicePhaseOffset(int voiceIndex) const;
-    DelayLine* getVoiceLeftDelayLine(int voiceIndex);
-    DelayLine* getVoiceRightDelayLine(int voiceIndex);
-    
-    // Independent LFO getters removed - access directly via LFO objects:
-    // getVoiceLeftLFO(index)->getFrequency(), getDepth(), getPhaseOffset(), etc.
-
-    enum class StereoMode {
-        Mono,           // Original mono behavior
-        Stereo,         // Stereo phase offset mode
-        MidSide         // Mid-Side processing mode
-    };
-    
-    // Stereo control methods
-    void setStereoMode(StereoMode mode);
-    void setStereoSpread(float spread);  // 0.0 = mono, 1.0 = maximum stereo
-    StereoMode getStereoMode() const { return currentStereoMode; }
-    float getStereoSpread() const { return stereoSpread; }
-    
-    // Mid-Side control methods
+    // Global parameter setters
+    void setEnabled(bool enabled);
+    void setNumVoices(int numVoices);
+    void setRate(float rate);
+    void setDepth(float depth);
+    void setMix(float mix);
+    void setBaseDelay(float delayMs);
+    void setVoiceAttenuation(float attenuationDb);
+    void setMasterVoiceLevel(float levelDb);
+    void setStereoMode(PanningMode mode);
+    void setStereoSpread(float spread);
     void setMidEnabled(bool enabled);
     void setSideEnabled(bool enabled);
-    void setSideGain(float gainDb);  // -20dB to +20dB
-    bool isMidEnabled() const { return midEnabled; }
-    bool isSideEnabled() const { return sideEnabled; }
-    float getSideGain() const { return sideGainDb; }
-
-    // Filter control methods
+    void setSideGain(float gainDb);
     void setLPFEnabled(bool enabled);
     void setHPFEnabled(bool enabled);
     void setLPFCutoff(float frequencyHz);
     void setHPFCutoff(float frequencyHz);
-    bool isLPFEnabled() const { return lpfEnabled; }
-    bool isHPFEnabled() const { return hpfEnabled; }
-    float getLPFCutoff() const { return lpfCutoff; }
-    float getHPFCutoff() const { return hpfCutoff; }
+    void setDelayType(DelayType delayType);
 
-    // Individual parameter setters
-    void setRate(float rate);
-    void setDepth(float depth);
-    void setVoiceCount(int voiceCount);
-    void setStereoMode(int stereoMode);
+    // Per-voice parameter setters
+    void setVoiceEnabled(int voiceIndex, bool enabled);
+    void setVoiceBaseDelay(int voiceIndex, float delayMs);
+
+    // ============================================================================
+    // INDIVIDUAL PARAMETER GETTERS
+    // ============================================================================
     
-    // Bulk parameter update method for efficient parameter changes
-    void updateParameters(float rate, float depth, float mix, float baseDelay, int voiceCount,
-                         int stereoMode, float stereoSpread,
+    // Global parameter getters
+    bool isEnabled() const { return config.enabled.load(); }
+    int getNumVoices() const { return config.numActiveVoices.load(); }
+    int getMaxVoices() const { return maxVoices; }
+    float getRate() const { return config.rate.load(); }
+    float getDepth() const { return config.depth.load(); }
+    float getMix() const { return config.mix.load(); }
+    float getBaseDelay() const { return config.baseDelay.load(); }
+    float getVoiceAttenuation() const { return config.voiceAttenuationDb.load(); }
+    float getMasterVoiceLevel() const { return config.masterVoiceLevelDb.load(); }
+    PanningMode getStereoMode() const { return config.panningMode.load(); }
+    float getStereoSpread() const { return config.stereoSpread.load(); }
+    bool isMidEnabled() const { return config.midEnabled.load(); }
+    bool isSideEnabled() const { return config.sideEnabled.load(); }
+    float getSideGain() const { return config.sideGainDb.load(); }
+    bool isLPFEnabled() const { return config.lpfEnabled.load(); }
+    bool isHPFEnabled() const { return config.hpfEnabled.load(); }
+    float getLPFCutoff() const { return config.lpfCutoff.load(); }
+    float getHPFCutoff() const { return config.hpfCutoff.load(); }
+    DelayType getDelayType() const { return config.delayType.load(); }
+    double getSampleRate() const { return sampleRate.load(); }
+    bool isPrepared() const { return prepared.load(); }
+
+    // Per-voice parameter getters
+    bool isVoiceEnabled(int voiceIndex) const;
+    float getVoiceRate(int voiceIndex) const;
+    float getVoiceDepth(int voiceIndex) const;
+    float getVoiceBaseDelay(int voiceIndex) const;
+    float getVoicePhaseOffset(int voiceIndex) const;
+
+    // ============================================================================
+    // LFO AND DELAY LINE ACCESS
+    // ============================================================================
+    
+    /**
+     * @brief Get direct access to a voice's LFO instance
+     * @param voiceIndex Voice index (0 to maxVoices-1)
+     * @return Pointer to the LFO instance, or nullptr if invalid index
+     */
+    LFO* getVoiceLFO(int voiceIndex);
+    
+    /**
+     * @brief Get direct access to a voice's left/mid LFO instance
+     * @param voiceIndex Voice index (0 to maxVoices-1)
+     * @return Pointer to the left/mid LFO instance, or nullptr if invalid index
+     */
+    LFO* getVoiceLeftLFO(int voiceIndex);
+    
+    /**
+     * @brief Get direct access to a voice's right/side LFO instance
+     * @param voiceIndex Voice index (0 to maxVoices-1)
+     * @return Pointer to the right/side LFO instance, or nullptr if invalid index
+     */
+    LFO* getVoiceRightLFO(int voiceIndex);
+    
+    /**
+     * @brief Get direct access to a voice's delay line instance
+     * @param voiceIndex Voice index (0 to maxVoices-1)
+     * @return Pointer to the DelayLine instance, or nullptr if invalid index
+     */
+    DelayLine* getVoiceDelayLine(int voiceIndex);
+
+    // ============================================================================
+    // BATCH PARAMETER UPDATES
+    // ============================================================================
+    
+    /**
+     * @brief Update all parameters efficiently in one call
+     * @param rate LFO modulation rate in Hz
+     * @param depth Modulation depth [0.0, 1.0]
+     * @param mix Dry/wet mix [0.0, 1.0]
+     * @param baseDelay Base delay time in milliseconds
+     * @param voiceAttenuation Voice attenuation per voice in dB (negative = quieter)
+     * @param masterVoiceLevel Master voice level attenuation in dB (negative = quieter)
+     * @param voiceCount Number of active voices
+     * @param panningMode Stereo processing mode
+     * @param stereoSpread Stereo spread amount [0.0, 1.0]
+     * @param midEnabled Enable mid channel processing
+     * @param sideEnabled Enable side channel processing
+     * @param sideGain Side channel gain in dB
+     * @param lpfEnabled Enable low-pass filtering
+     * @param lpfCutoff LPF cutoff frequency in Hz
+     * @param hpfEnabled Enable high-pass filtering
+     * @param hpfCutoff HPF cutoff frequency in Hz
+     */
+    void updateParameters(float rate, float depth, float mix, float baseDelay, float voiceAttenuation, float masterVoiceLevel, int voiceCount,
+                         int panningMode, float stereoSpread,
                          bool midEnabled, bool sideEnabled, float sideGain,
                          bool lpfEnabled = false, float lpfCutoff = 20000.0f,
                          bool hpfEnabled = false, float hpfCutoff = 20.0f);
 
 private:
-    // Internal helper methods
-    void syncRightLFOsToLeft();
+    // ============================================================================
+    // PRIVATE MEMBER VARIABLES
+    // ============================================================================
     
-    // Voice structure
+    // Sonic parameters (what makes this module sound/behave differently)
+    Config config;                                          // PRIVATE - internal storage
+    
+    // System/technical parameters (not sonic)
+    std::atomic<bool> prepared{false};                     // PRIVATE - implementation state
+    std::atomic<double> sampleRate{44100.0};               // PRIVATE - system value
+    const int maxVoices;                                   // PRIVATE - construction parameter
+    
+    // ============================================================================
+    // VOICE STRUCTURE
+    // ============================================================================
+    
+    /**
+     * @brief Individual voice structure containing LFOs and delay lines
+     */
     struct Voice {
         // Dual LFO system for independent channel control
-        std::array<LFO, 2> lfos;  // [0] = left/mid, [1] = right/side
-        std::array<std::unique_ptr<DelayLine>, 2> delayLines;  // [0] = left/mid, [1] = right/side - polymorphic for different delay types
+        std::array<LFO, 2> lfos;                           // [0] = left/mid, [1] = right/side
+        std::array<std::unique_ptr<DelayLine>, 2> delayLines; // [0] = left/mid, [1] = right/side
         
-        std::atomic<bool> enabled{false};
-        
-        // Non-LFO voice parameters (chorus-specific, not duplicated in LFO)
-        std::atomic<float> mix{0.7f};
-        std::atomic<float> baseDelay{30.0f};
-        
-        // Note: All LFO parameters (rate, depth, phase) are now stored ONLY in the LFO objects
-        // Access via: lfos[0].getFrequency(), lfos[0].getDepth(), lfos[0].getPhaseOffset(), etc.
-        
-        // Current state variables
-        float currentLfoValue{0.0f};
-        float currentDelayTime{0.03f};
-        
-        // Mid-Side channel offsets (for backward compatibility)
-        float midPhaseOffset{0.0f};
-        float sidePhaseOffset{0.0f};
+        // Voice state parameters
+        std::atomic<bool> enabled{false};                  ///< Voice enabled state
+        std::atomic<float> baseDelayMs{30.0f};             ///< Voice-specific base delay time in milliseconds
     };
     
     // Core components - dynamic array of voices
-    std::unique_ptr<Voice[]> voices;
-    const int maxVoices;  // Maximum number of voices (set at construction)
+    std::unique_ptr<Voice[]> voices;                       ///< Array of voice instances
     
-    // Global parameters (thread-safe using atomics)
-    // Note: LFO parameters (rate, depth, phase) are stored in individual LFO objects
-    std::atomic<float> mix{0.7f};
-    std::atomic<float> baseDelay{30.0f};
-    std::atomic<double> sampleRate{44100.0};
-    std::atomic<bool> prepared{false};
-    std::atomic<int> numActiveVoices{1};
-    std::atomic<bool> enabled{true};
-    std::atomic<DelayType> currentDelayType{DelayType::BBDelay};  // Track current delay type - default to BBD
-    
-    // Constants
-    static constexpr int DEFAULT_MAX_VOICES = 5;
-    static constexpr int MIN_MAX_VOICES = 1;
-    static constexpr int MAX_MAX_VOICES = 16;
-    static constexpr float MIN_RATE = 0.1f;
-    static constexpr float MAX_RATE = 2.0f;
-    static constexpr float MIN_DEPTH = 0.0f;
-    static constexpr float MAX_DEPTH = 1.0f;
-    static constexpr float MIN_MIX = 0.0f;
-    static constexpr float MAX_MIX = 1.0f;
-    static constexpr float MIN_BASE_DELAY = 10.0f;
-    static constexpr float MAX_BASE_DELAY = 100.0f;
-    static constexpr float MIN_DELAY_MS = 1.0f;
-    static constexpr float MAX_DELAY_MS = 10.0f;
-    static constexpr float MIN_PHASE_OFFSET = 0.0f;
-    static constexpr float MAX_PHASE_OFFSET = 360.0f;
-
-    // Stereo parameters
-    StereoMode currentStereoMode = StereoMode::Mono;
-    float stereoSpread = 0.5f;
-    
-    // Mid-Side parameters
-    bool midEnabled = true;
-    bool sideEnabled = true;
-    float sideGainDb = 0.0f;  // Side gain in dB (-20 to +20)
-    
-    // Filter parameters
-    bool lpfEnabled = false;
-    bool hpfEnabled = false;
-    float lpfCutoff = 20000.0f;  // Hz
-    float hpfCutoff = 20.0f;     // Hz
+    // ============================================================================
+    // FILTER COMPONENTS
+    // ============================================================================
     
     // JUCE filters for wet signal processing
-    std::array<juce::IIRFilter, 2> lpfFilters;  // Left/Right or Mid/Side
-    std::array<juce::IIRFilter, 2> hpfFilters;  // Left/Right or Mid/Side
+    std::array<juce::IIRFilter, 2> lpfFilters;             // Left/Right or Mid/Side LPF
+    std::array<juce::IIRFilter, 2> hpfFilters;             // Left/Right or Mid/Side HPF
+    
+    // ============================================================================
+    // PRIVATE HELPER METHODS
+    // ============================================================================
+    
+    // Voice management
+    void initializeVoice(int voiceIndex);
+    void syncRightLFOsToLeft();
     
     // Stereo processing methods
-    void processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
-    void processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
-    void processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     void updateStereoConfiguration();
     void configureMonoPhaseOffsets();
     void configureStereoPhaseOffsets();
     void configureMidSidePhaseOffsets();
+    void processVoicesMono(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
+    void processVoicesStereo(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
+    void processVoicesMidSide(juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& wetBuffer);
     
-    // Filter processing method
+    // Filter processing methods
     void processFilters(juce::AudioBuffer<float>& wetBuffer);
-    
-    // Internal filter coefficient update methods
     void updateLPFCoefficients(int channel);
     void updateHPFCoefficients(int channel);
-    
-    // Voice configuration helper methods
-    float calculateVoiceMixRatio(int voiceIndex) const;
 };
 
 } // namespace audio_plugin

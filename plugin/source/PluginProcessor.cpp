@@ -274,7 +274,7 @@ namespace audio_plugin {
         chorus.prepare(sampleRate, getTotalNumInputChannels());
         
         // Initialize chorus with default parameters
-        chorus.setVoiceCount(1);  // Start with 1 voice
+        chorus.setNumVoices(1);  // Start with 1 voice
         chorus.setMix(0.5f);     // 50% wet/dry mix
         chorus.setBaseDelay(30.0f); // 30ms base delay
         
@@ -384,12 +384,12 @@ namespace audio_plugin {
                 chorus.setBaseDelay(static_cast<float>(*chorusBaseDelayParam));
             }
             if (chorusVoiceCountChanged.load() && chorusVoiceCountParam) {
-                chorus.setVoiceCount(static_cast<int>(*chorusVoiceCountParam));
+                chorus.setNumVoices(static_cast<int>(*chorusVoiceCountParam));
             }
 
             // Update stereo parameters
             if (chorusStereoModeChanged.load() && chorusStereoModeParam) {
-                chorus.setStereoMode(static_cast<int>(*chorusStereoModeParam));
+                chorus.setStereoMode(static_cast<audio_plugin::Chorus::PanningMode>(static_cast<int>(*chorusStereoModeParam)));
             }
             if (chorusStereoSpreadChanged.load() && chorusStereoSpreadParam) {
                 chorus.setStereoSpread(static_cast<float>(*chorusStereoSpreadParam));

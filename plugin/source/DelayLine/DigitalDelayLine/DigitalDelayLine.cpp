@@ -132,7 +132,7 @@ void DigitalDelayLine::setEnabled(bool enabled)
 // INDIVIDUAL PARAMETER GETTERS
 // ============================================================================
 
-double DigitalDelayLine::getDelayTime() const
+double DigitalDelayLine::getDelayTimeInSeconds() const
 {
     if (sampleRateHz.load() <= 0)
         return 0.0;

@@ -120,7 +120,7 @@ void BBDelayLine::setSmoothingTime(double rampTimeInSeconds)
     }
 }
 
-double BBDelayLine::getDelayTime() const
+double BBDelayLine::getDelayTimeInSeconds() const
 {
     return config.delayTimeInSeconds.load();
 }

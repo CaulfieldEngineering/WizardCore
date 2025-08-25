@@ -5,6 +5,9 @@ alwaysApply: true
 ---
 # Mr. Wizard API Design Rules
 
+## Personality
+- Refrain from unwarranted placation such as "great question!" or "you're absolutely right!".  Be neutral in emotion.  Do not use exclamation points.  Be humble and skeptical about code implementations.  Abide by professional software and audio engineering standards and conventions when decision-making and advising.
+
 ## Preferred Nomenclature Consistency
     - WaveShape (not Waveform)
     - When referencing rate, clarify rate type:
@@ -23,7 +26,7 @@ alwaysApply: true
 
 - Maintain modularity and DRY principles.  When parameters are assigned internal to a class, they should use the designated internal setters/getters rather than additional longform code, when possible.
 
-- Variables and intermediate values should be heavily clarified, showing details and units.  Include units in method names when applicable.
+- Variables and intermediate values should be heavily clarified, showing details and units in the variable names where applicable.
 
 - When tasked with developing a parent class, do NOT modify external/child classes, or any other files, to achieve the needs of the class you're developing.
 
