@@ -3,3 +3,322 @@ description:
 globs:
 alwaysApply: false
 ---
+# Design Rule: Config Struct Pattern for Sonic Parameters
+
+## Overview
+This design rule defines the standard pattern for organizing class parameters using a centralized Config struct. The Config struct contains **parameters of sonic or usable interest** - the parameters that define how the module sounds, behaves, and functions musically.
+
+## Core Principle
+
+### **Config Struct = Sonic/Usable Parameters (Read-Only)**
+The Config struct contains only parameters that:
+- **Directly affect the sound or behavior**
+- **Define the musical character of the module**
+- **Are of interest to users for creative purposes**
+- **Change how the module functions**
+
+**IMPORTANT**: The Config struct is for **READ-ONLY ACCESS** and provides a birds-eye view of relevant parameters. All parameter modifications must go through dedicated setter methods.
+
+### **Regular Members = System/Technical Parameters**
+Regular member variables contain:
+- **System values** (sample rate, host BPM)
+- **Processing state** (prepared, position, buffers)
+- **Implementation details** (change detection, smoothing)
+
+## Class Organization: Public vs Private
+
+### **PUBLIC Section (Order is Critical!)**
+
+The Config struct MUST be defined in the PUBLIC section, right after enums and constants:
+
+```cpp
+public:
+    // ============================================================================
+    // ENUMS AND CONSTANTS
+    // ============================================================================
+    
+    enum class WaveShape { ... };
+    enum class CouplingType { ... };
+    
+    static constexpr float MIN_FREQ = 0.1f;
+    static constexpr float MAX_FREQ = 1000.0f;
+    
+    // ============================================================================
+    // CONFIGURATION STRUCT
+    // ============================================================================
+    
+    /**
+     * @brief Sonic parameters that define the module's behavior and character
+     * 
+     * NOTE: This struct is for READ-ONLY ACCESS and parameter overview.
+     * All modifications must use the dedicated setter methods.
+     */
+    struct Config {
+        // Core sonic parameters
+        std::atomic<double> frequencyHz{1.0};           ///< LFO frequency in Hz
+        std::atomic<float> depth{1.0f};                 ///< Modulation depth [0.0, 1.0]
+        std::atomic<double> phaseOffsetRadians{0.0};    ///< Phase offset in radians
+        std::atomic<bool> enabled{true};                ///< Enabled state
+        std::atomic<WaveShape> waveShape{WaveShape::Sine}; ///< Waveform type
+        std::atomic<CouplingType> coupling{CouplingType::DC}; ///< Coupling type
+    };
+
+    // ============================================================================
+    // CONSTRUCTOR & DESTRUCTOR
+    // ============================================================================
+    
+    MyClass();
+    ~MyClass();
+    
+    // ============================================================================
+    // PUBLIC INTERFACE
+    // ============================================================================
+    
+    // Access to sonic configuration for debugging/monitoring (READ-ONLY)
+    const Config& getConfig() const { return config; }  // PUBLIC - parameter overview
+    
+    // Individual parameter setters (REQUIRED for all Config parameters)
+    void setFrequency(double freq);                     // PUBLIC - parameter modification
+    void setDepth(float newDepth);                      // PUBLIC - parameter modification
+    void setEnabled(bool newEnabled);                   // PUBLIC - parameter modification
+    
+    // Individual parameter getters
+    double getFrequency() const;                        // PUBLIC - individual access
+    float getDepth() const;                             // PUBLIC - individual access
+    bool isEnabled() const;                             // PUBLIC - individual access
+```
+
+### **PRIVATE Section**
+
+```cpp
+private:
+    // ============================================================================
+    // PRIVATE MEMBER VARIABLES
+    // ============================================================================
+    
+    // Sonic parameters (what makes this module sound/behave differently)
+    Config config;                                    // PRIVATE - internal storage
+    
+    // System/technical parameters (not sonic)
+    std::atomic<bool> prepared{false};                // PRIVATE - implementation state
+    std::atomic<double> sampleRateHz{44100.0};        // PRIVATE - system value
+    std::atomic<double> hostBPM{120.0};               // PRIVATE - system value
+    std::atomic<double> position{0.0f};               // PRIVATE - processing state
+    
+    // Smoothed parameters (prevent audio clicks)
+    juce::SmoothedValue<float> smoothedDepth{config.depth.load()};
+    juce::SmoothedValue<float> smoothedSymmetry{config.symmetry.load()};
+    
+    // Change detection (implementation detail)
+    std::atomic<float> lastFrequency{-1.0f};          // PRIVATE - internal tracking
+    std::atomic<bool> firstRun{true};                 // PRIVATE - internal state
+```
+
+## Implementation Pattern
+
+### Step 1: Define the Config Struct (PUBLIC - Right After Enums/Constants)
+```cpp
+public:
+    // ============================================================================
+    // ENUMS AND CONSTANTS
+    // ============================================================================
+    
+    enum class WaveShape { ... };
+    static constexpr float MIN_FREQ = 0.1f;
+    
+    // ============================================================================
+    // CONFIGURATION STRUCT
+    // ============================================================================
+    
+    /**
+     * @brief Sonic parameters that define the module's behavior and character
+     * 
+     * NOTE: This struct is for READ-ONLY ACCESS and parameter overview.
+     * All modifications must use the dedicated setter methods.
+     */
+    struct Config {
+        // Core sonic parameters
+        std::atomic<double> frequencyHz{1.0};           ///< LFO frequency in Hz
+        std::atomic<float> depth{1.0f};                 ///< Modulation depth [0.0, 1.0]
+        std::atomic<double> phaseOffsetRadians{0.0};    ///< Phase offset in radians
+        std::atomic<bool> enabled{true};                ///< Enabled state
+        std::atomic<WaveShape> waveShape{WaveShape::Sine}; ///< Waveform type
+        std::atomic<CouplingType> coupling{CouplingType::DC}; ///< Coupling type
+    };
+```
+
+### Step 2: Class Member Variables Organization (PRIVATE)
+```cpp
+class MyClass {
+private:
+    // ============================================================================
+    // PRIVATE MEMBER VARIABLES
+    // ============================================================================
+    
+    // Sonic parameters (what makes this module sound/behave differently)
+    Config config;                                    // PRIVATE - internal storage
+    
+    // System/technical parameters (not sonic)
+    std::atomic<bool> prepared{false};                // PRIVATE - implementation state
+    std::atomic<double> sampleRateHz{44100.0};        // PRIVATE - system value
+    std::atomic<double> hostBPM{120.0};               // PRIVATE - system value
+    std::atomic<double> position{0.0f};               // PRIVATE - processing state
+    
+    // Smoothed parameters (prevent audio clicks)
+    juce::SmoothedValue<float> smoothedDepth{config.depth.load()};
+    juce::SmoothedValue<float> smoothedSymmetry{config.symmetry.load()};
+    
+    // Change detection (implementation detail)
+    std::atomic<float> lastFrequency{-1.0f};
+    std::atomic<bool> firstRun{true};
+};
+```
+
+### Step 3: Public Interface
+```cpp
+public:
+    // Access to sonic configuration for debugging/monitoring (READ-ONLY)
+    const Config& getConfig() const { return config; }
+    
+    // Individual parameter setters (REQUIRED for all Config parameters)
+    void setFrequency(double freq) { 
+        config.frequencyHz.store(std::clamp(freq, MIN_FREQ, MAX_FREQ)); 
+    }
+    
+    void setDepth(float newDepth) {
+        config.depth.store(std::clamp(newDepth, 0.0f, 1.0f));
+    }
+    
+    void setEnabled(bool newEnabled) {
+        config.enabled.store(newEnabled);
+    }
+    
+    // Individual parameter getters
+    double getFrequency() const { return config.frequencyHz.load(); }
+    float getDepth() const { return config.depth.load(); }
+    bool isEnabled() const { return config.enabled.load(); }
+    
+    // Batch parameter updates
+    void updateParameters(double freq, float depth, bool enabled) {
+        setFrequency(freq);
+        setDepth(depth);
+        setEnabled(enabled);
+    }
+};
+```
+
+## Parameter Categorization
+
+### **Config Struct (Sonic/Usable Interest - Read-Only)**
+- **Include**: Parameters that change the sound, behavior, or musical character
+- **Examples**: Frequency, depth, wave shape, phase offset, symmetry, enabled state
+- **Why**: These are what users care about and what define the module's function
+- **Access**: READ-ONLY through getConfig() for monitoring/debugging
+
+### **Regular Member Variables (System/Technical)**
+- **Include**: System values, processing state, implementation details
+- **Examples**: Sample rate, host BPM, prepared state, position, change detection
+- **Why**: These are technical necessities, not creative parameters
+
+## Access Rules
+
+### **Config Struct Access**
+1. **READ-ONLY**: The Config struct is for parameter overview and monitoring
+2. **No Direct Modification**: Never modify config.param.store() from outside the class
+3. **Public Getter**: Use getConfig() to access current parameter values
+4. **Thread Safety**: All Config parameters use std::atomic<T> for safe reading
+
+### **Parameter Modification**
+1. **Setter Methods Only**: All parameter changes must use dedicated setter methods
+2. **Validation**: Setters handle parameter validation, clamping, and side effects
+3. **Thread Safety**: Setters ensure thread-safe parameter updates
+4. **Consistency**: Setters maintain internal state consistency
+
+## CRITICAL IMPLEMENTATION REQUIREMENTS
+
+### **1. Config Struct MUST Be PUBLIC**
+- **Location**: Right after enums and constants in the public section
+- **Timing**: Must be defined before any methods that reference it
+- **Reason**: Prevents "config identifier undeclared" compilation errors
+
+### **2. Config Instance MUST Be PRIVATE**
+- **Location**: In the private member variables section
+- **Access**: Only accessible through getConfig() and internal methods
+- **Reason**: Maintains encapsulation while providing parameter overview
+
+### **3. Order of Declaration is Critical**
+```cpp
+public:
+    // 1. Enums and Constants FIRST
+    enum class WaveShape { ... };
+    static constexpr float MIN_FREQ = 0.1f;
+    
+    // 2. Config Struct SECOND (must be public)
+    struct Config { ... };
+    
+    // 3. Constructor/Destructor THIRD
+    MyClass();
+    ~MyClass();
+    
+    // 4. Public Interface FOURTH
+    const Config& getConfig() const { return config; }
+    void setFrequency(double freq);
+    
+private:
+    // 5. Private Member Variables LAST
+    Config config;  // Private instance of public struct
+    std::atomic<bool> prepared{false};
+```
+
+## Simple Rules
+
+1. **Config struct** = "What makes this sound/behave differently?" (PUBLIC, READ-ONLY)
+2. **Config instance** = Private member variable containing actual values
+3. **Regular members** = "What does the system/implementation need?"
+4. **All Config parameters** use `std::atomic<T>` for thread safety
+5. **Public getter** `getConfig()` provides READ-ONLY access to sonic state
+6. **Individual setters** are REQUIRED for all Config parameters
+7. **Never modify** Config parameters directly from outside the class
+
+## Example Usage
+
+```cpp
+// CORRECT: Get current sonic state (read-only)
+const auto& config = lfo.getConfig();
+double freq = config.frequencyHz.load();
+WaveShape shape = config.waveShape.load();
+
+// CORRECT: Set sonic parameters through setters
+lfo.setFrequency(2.0);
+lfo.setWaveShape(WaveShape::Triangle);
+lfo.setDepth(0.75);
+
+// CORRECT: Batch update through dedicated method
+lfo.updateParameters(1.5, 0.75, true);
+
+// INCORRECT: Direct modification (won't compile or causes issues)
+// lfo.config.frequencyHz.store(2.0);        // Don't do this!
+// lfo.getConfig().frequencyHz.store(2.0);   // Don't do this!
+```
+
+## Benefits
+
+- **Clear separation** between sonic and technical parameters
+- **Easy debugging** - one call gets all sonic state
+- **Thread safety** built into sonic parameters
+- **Intuitive API** - Config contains what users care about
+- **Maintainable** - sonic parameters in one place
+- **Controlled modification** - all changes go through validated setters
+- **Parameter overview** - easy to see all relevant parameters at a glance
+
+## Implementation Requirements
+
+1. **Every Config parameter must have a corresponding setter method**
+2. **Setters must validate and clamp parameters appropriately**
+3. **Setters must handle any necessary side effects (smoothing, etc.)**
+4. **The Config struct must be PUBLIC to prevent compilation errors**
+5. **The Config instance must be PRIVATE to maintain encapsulation**
+6. **The getConfig() method must return a const reference**
+7. **Order of declaration must be: Enums → Constants → Config Struct → Methods**
+
+This pattern ensures the Config struct provides a clear overview of sonic parameters while maintaining proper encapsulation and controlled parameter modification through dedicated setter methods, without causing compilation errors.
