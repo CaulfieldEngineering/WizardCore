@@ -13,60 +13,71 @@ if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # ============================================================================
     
     # Chorus Module
-    add_library(WizardCore::Chorus STATIC
+    add_library(WizardCore_Chorus STATIC
         Chorus/Chorus.cpp
     )
     
-    target_include_directories(WizardCore::Chorus PUBLIC 
+    target_include_directories(WizardCore_Chorus PUBLIC 
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore::Chorus PUBLIC 
+    target_link_libraries(WizardCore_Chorus PUBLIC 
         juce::juce_audio_utils 
         juce::juce_dsp
     )
     
     # LFO Module  
-    add_library(WizardCore::LFO STATIC
+    add_library(WizardCore_LFO STATIC
         LFO/LFO.cpp
     )
     
-    target_include_directories(WizardCore::LFO PUBLIC
+    target_include_directories(WizardCore_LFO PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore::LFO PUBLIC
+    target_link_libraries(WizardCore_LFO PUBLIC
         juce::juce_audio_utils
         juce::juce_dsp
     )
     
     # DelayLine Module
-    add_library(WizardCore::DelayLine STATIC
+    add_library(WizardCore_DelayLine STATIC
         DelayLine/DelayLine.cpp
         DelayLine/BBDelayLine/BBDelayLine.cpp
         DelayLine/DigitalDelayLine/DigitalDelayLine.cpp
     )
     
-    target_include_directories(WizardCore::DelayLine PUBLIC
+    target_include_directories(WizardCore_DelayLine PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore::DelayLine PUBLIC
+    target_link_libraries(WizardCore_DelayLine PUBLIC
         juce::juce_audio_utils
         juce::juce_dsp
     )
+    
+    # ============================================================================
+    # CREATE ALIASES WITH :: NAMESPACE
+    # ============================================================================
+    
+    # Create aliases that follow modern CMake conventions
+    add_library(WizardCore::Chorus ALIAS WizardCore_Chorus)
+    add_library(WizardCore::LFO ALIAS WizardCore_LFO)
+    add_library(WizardCore::DelayLine ALIAS WizardCore_DelayLine)
     
     # ============================================================================
     # UMBRELLA TARGET (optional convenience target)
     # ============================================================================
     
     # Create an interface target that includes all audio modules
-    add_library(WizardCore::AudioModules INTERFACE)
-    target_link_libraries(WizardCore::AudioModules INTERFACE
-        WizardCore::Chorus
-        WizardCore::LFO
-        WizardCore::DelayLine
+    add_library(WizardCore_AudioModules INTERFACE)
+    target_link_libraries(WizardCore_AudioModules INTERFACE
+        WizardCore_Chorus
+        WizardCore_LFO
+        WizardCore_DelayLine
     )
+    
+    add_library(WizardCore::AudioModules ALIAS WizardCore_AudioModules)
     
     message(STATUS "WizardOne audio modules targets created successfully")
     
