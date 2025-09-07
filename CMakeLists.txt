@@ -119,6 +119,10 @@ add_subdirectory(plugin)
 # =====================================================================
 add_subdirectory(plugin/images)
 
+# Adds the WizardOne audio modules as library targets (for external use)
+# =====================================================================
+add_subdirectory(plugin/source)
+
 # Adds all the targets configured in the "test" folder.
 # =====================================================================
 #add_subdirectory(test)
