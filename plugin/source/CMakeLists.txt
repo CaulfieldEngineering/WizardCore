@@ -1,12 +1,17 @@
 # WizardOne Audio Modules CMake Configuration
-# This file creates library targets for the WizardOne audio modules
-# so they can be used as external dependencies by other projects
+# ============================================================================
+# This file creates reusable CMake library targets for the WizardOne audio modules
+# so they can be used as clean external dependencies by other projects.
+#
+# Created targets:
+# - WizardCore_Chorus, WizardCore_LFO, WizardCore_DelayLine (base targets)
+# - WizardCore::Chorus, WizardCore::LFO, WizardCore::DelayLine (modern aliases)
+# - WizardCore_AudioModules, WizardCore::AudioModules (umbrella targets)
+#
+# Usage in external projects:
+# target_link_libraries(MyProject PRIVATE WizardCore::Chorus WizardCore::LFO)
 
 cmake_minimum_required(VERSION 3.22)
-
-# Only create targets if this is being used as a subproject
-# (i.e., when included by CPM or add_subdirectory)
-if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
     # ============================================================================
     # INDIVIDUAL AUDIO MODULE TARGETS
@@ -57,28 +62,29 @@ if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     )
     
     # ============================================================================
-    # CREATE ALIASES WITH :: NAMESPACE
+    # CREATE MODERN CMAKE ALIASES WITH :: NAMESPACE
     # ============================================================================
+    # These aliases follow modern CMake conventions (like juce::juce_audio_utils)
+    # and provide a clean, professional interface for external projects
     
-    # Create aliases that follow modern CMake conventions
     add_library(WizardCore::Chorus ALIAS WizardCore_Chorus)
     add_library(WizardCore::LFO ALIAS WizardCore_LFO)
     add_library(WizardCore::DelayLine ALIAS WizardCore_DelayLine)
     
     # ============================================================================
-    # UMBRELLA TARGET (optional convenience target)
+    # UMBRELLA TARGET (convenience target for importing all modules at once)
     # ============================================================================
+    # This allows external projects to link all audio modules with a single target:
+    # target_link_libraries(MyProject PRIVATE WizardCore::AudioModules)
     
-    # Create an interface target that includes all audio modules
     add_library(WizardCore_AudioModules INTERFACE)
     target_link_libraries(WizardCore_AudioModules INTERFACE
-        WizardCore_Chorus
-        WizardCore_LFO
-        WizardCore_DelayLine
+        WizardCore_Chorus      # Includes Chorus module
+        WizardCore_LFO         # Includes LFO module  
+        WizardCore_DelayLine   # Includes DelayLine module
     )
     
+    # Create modern alias for the umbrella target
     add_library(WizardCore::AudioModules ALIAS WizardCore_AudioModules)
     
-    message(STATUS "WizardOne audio modules targets created successfully")
-    
-endif() 
+message(STATUS "WizardOne audio modules targets created successfully") 

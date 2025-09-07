@@ -28,51 +28,7 @@ if (APPLE)
 endif()
 
 
-# Determine the value of DEMO_BUILD
-# =====================================================================
-if (BUILD_DEMO)
-    set(DEMO_BUILD True)
-else()
-    set(DEMO_BUILD False)
-endif()
 
-
-# Configure the Windows Installation package files
-# =====================================================================
-message(STATUS "CMakeLists.txt: Configuring Windows Installation Files.")
-configure_file(
-  ${CMAKE_SOURCE_DIR}/package_config/installer_win.iss.in
-  ${CMAKE_BINARY_DIR}/installer_win.iss
-  @ONLY
-)
-
-
-# Configure the Windows Installation package files
-# =====================================================================
-message(STATUS "CMakeLists.txt: Configuring Windows Installation Files.")
-configure_file(
-  ${CMAKE_SOURCE_DIR}/package_config/installer_win.iss.in
-  ${CMAKE_BINARY_DIR}/installer_win.iss
-  @ONLY
-)
-
-# Configure the macOS Distribution package file
-# =====================================================================
-message(STATUS "CMakeLists.txt: Configuring macOS Distribution XML (Full).")
-configure_file(
-  ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-full.xml
-  ${CMAKE_BINARY_DIR}/distribution-full.xml
-  @ONLY
-)
-
-# Configure the macOS Distribution package file
-# =====================================================================
-message(STATUS "CMakeLists.txt: Configuring macOS Distribution XML (Demo).")
-configure_file(
-  ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-demo.xml
-  ${CMAKE_BINARY_DIR}/distribution-demo.xml
-  @ONLY
-)
 
 # I like to download the dependencies to the same folder as the project.
 # If you want to install them system wide, set CPM_SOURCE_CACHE with the path to the dependencies
@@ -85,43 +41,101 @@ set(LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 # =====================================================================
 include(cmake/cpm.cmake)
 
-# This commands downloads AND configures JUCE. It sets up some variables, like JUCE_SOURCE_DIR.
-# =====================================================================
-CPMAddPackage(
-    NAME JUCE
-    GIT_TAG 8.0.8  # ← Updated to latest stable release
-    GITHUB_REPOSITORY juce-framework/JUCE
-    SOURCE_DIR ${LIB_DIR}/juce
-)
-
-# Adds googletest.
-# =====================================================================
-# CPMAddPackage(
-#     NAME GOOGLETEST
-#     GITHUB_REPOSITORY google/googletest
-#     GIT_TAG v1.13.0
-#     VERSION 1.13.0
-#     SOURCE_DIR ${LIB_DIR}/googletest
-#     OPTIONS
-#         "INSTALL_GTEST OFF"
-#         "gtest_force_shared_crt ON"
-# )
-
 # This command allows running tests from the "build" folder (the one where CMake generates the project to).
 # =====================================================================
 enable_testing()
 
-# Adds all the targets configured in the "plugin" folder.
+# Conditional Building: Detect if WizardOne is being built directly or imported
 # =====================================================================
-add_subdirectory(plugin)
+# This automatic detection allows WizardOne to serve dual purposes:
+# 1. Standalone plugin project (when built directly)
+# 2. Audio module library (when imported by other projects via CPM)
+#
+# How the detection works:
+# - CMAKE_PROJECT_NAME = the top-level project being built (never changes)
+# - PROJECT_NAME = the current project being processed (this project)
+# 
+# Examples:
+# - Building WizardOne directly: CMAKE_PROJECT_NAME="WizardOne", PROJECT_NAME="WizardOne" → Equal
+# - ChorusSandbox imports WizardOne: CMAKE_PROJECT_NAME="ChorusSandbox", PROJECT_NAME="WizardOne" → Not equal
 
-# Adds graphical assets folder
-# =====================================================================
-add_subdirectory(plugin/images)
-
-# Adds the WizardOne audio modules as library targets (for external use)
-# =====================================================================
-add_subdirectory(plugin/source)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # ============================================================================
+    # DIRECT BUILD MODE: Building WizardOne as the main project
+    # ============================================================================
+    # This happens when someone runs: cd WizardOne && cmake -S . -B build
+    # Build the complete WizardOne plugin with UI, parameters, and audio modules
+    
+    message(STATUS "WizardOne: Building as main project (full plugin)")
+    
+    # ============================================================================
+    # JUCE FRAMEWORK IMPORT (only needed for direct builds)
+    # ============================================================================
+    # When building WizardOne directly, we need to import JUCE
+    # When imported as subproject, the parent project (e.g., ChorusSandbox) has already imported JUCE
+    
+    message(STATUS "  → Importing JUCE framework")
+    CPMAddPackage(
+        NAME JUCE
+        GIT_TAG 8.0.8  # ← Updated to latest stable release
+        GITHUB_REPOSITORY juce-framework/JUCE
+        SOURCE_DIR ${LIB_DIR}/juce
+    )
+    
+    # ============================================================================
+    # DEMO/FULL VERSION CONFIGURATION (only needed for direct builds)
+    # ============================================================================
+    if (BUILD_DEMO)
+        set(DEMO_BUILD True)
+        message(STATUS "  → Building Demo version")
+    else()
+        set(DEMO_BUILD False)
+        message(STATUS "  → Building Full version")
+    endif()
+    
+    # ============================================================================
+    # INSTALLER PACKAGE CONFIGURATION (only needed for direct builds)
+    # ============================================================================
+    # Configure installer templates with project variables for packaging
+    
+    message(STATUS "  → Configuring Windows installer templates")
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/package_config/installer_win.iss.in
+        ${CMAKE_BINARY_DIR}/installer_win.iss
+        @ONLY
+    )
+    
+    message(STATUS "  → Configuring macOS installer templates")
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-full.xml
+        ${CMAKE_BINARY_DIR}/distribution-full.xml
+        @ONLY
+    )
+    
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-demo.xml
+        ${CMAKE_BINARY_DIR}/distribution-demo.xml
+        @ONLY
+    )
+    
+    add_subdirectory(plugin)         # Complete plugin implementation
+    add_subdirectory(plugin/images)  # Plugin assets and resources
+    
+else()
+    # ============================================================================
+    # LIBRARY MODE: WizardOne imported as audio module provider
+    # ============================================================================
+    # This happens when another project imports WizardOne via CPM, such as:
+    # CPMAddPackage(NAME WizardOne GITHUB_REPOSITORY CaulfieldEngineering/WizardOne)
+    # Only create the WizardCore:: audio module targets, skip the full plugin
+    
+    message(STATUS "WizardOne: Building as subproject (audio modules only)")
+    message(STATUS "  → Main project: ${CMAKE_PROJECT_NAME}")
+    message(STATUS "  → Creating WizardCore:: targets for external use")
+    
+    add_subdirectory(plugin/source)  # Only the audio modules (Chorus, LFO, DelayLine)
+    
+endif()
 
 # Adds all the targets configured in the "test" folder.
 # =====================================================================
