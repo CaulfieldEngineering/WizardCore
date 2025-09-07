@@ -14,49 +14,57 @@
 cmake_minimum_required(VERSION 3.22)
 
     # ============================================================================
-    # INDIVIDUAL AUDIO MODULE TARGETS
+    # INDIVIDUAL AUDIO MODULE TARGETS (Header-Only for Fast Builds)
     # ============================================================================
+    # These are INTERFACE libraries - they provide headers and source files
+    # but don't compile separately, avoiding duplicate JUCE compilation
     
     # Chorus Module
-    add_library(WizardCore_Chorus STATIC
-        Chorus/Chorus.cpp
+    add_library(WizardCore_Chorus INTERFACE)
+    
+    target_sources(WizardCore_Chorus INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Chorus/Chorus.cpp
     )
     
-    target_include_directories(WizardCore_Chorus PUBLIC 
+    target_include_directories(WizardCore_Chorus INTERFACE 
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore_Chorus PUBLIC 
+    target_link_libraries(WizardCore_Chorus INTERFACE 
         juce::juce_audio_utils 
         juce::juce_dsp
     )
     
     # LFO Module  
-    add_library(WizardCore_LFO STATIC
-        LFO/LFO.cpp
+    add_library(WizardCore_LFO INTERFACE)
+    
+    target_sources(WizardCore_LFO INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/LFO/LFO.cpp
     )
     
-    target_include_directories(WizardCore_LFO PUBLIC
+    target_include_directories(WizardCore_LFO INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore_LFO PUBLIC
+    target_link_libraries(WizardCore_LFO INTERFACE
         juce::juce_audio_utils
         juce::juce_dsp
     )
     
     # DelayLine Module
-    add_library(WizardCore_DelayLine STATIC
-        DelayLine/DelayLine.cpp
-        DelayLine/BBDelayLine/BBDelayLine.cpp
-        DelayLine/DigitalDelayLine/DigitalDelayLine.cpp
+    add_library(WizardCore_DelayLine INTERFACE)
+    
+    target_sources(WizardCore_DelayLine INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/DelayLine/DelayLine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/DelayLine/BBDelayLine/BBDelayLine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/DelayLine/DigitalDelayLine/DigitalDelayLine.cpp
     )
     
-    target_include_directories(WizardCore_DelayLine PUBLIC
+    target_include_directories(WizardCore_DelayLine INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
-    target_link_libraries(WizardCore_DelayLine PUBLIC
+    target_link_libraries(WizardCore_DelayLine INTERFACE
         juce::juce_audio_utils
         juce::juce_dsp
     )
