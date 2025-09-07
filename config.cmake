@@ -1,7 +1,7 @@
 # config.cmake
 
 # Define global variables
-set(wPLUGIN_NAME                "WizardOne")
+set(wPLUGIN_NAME                "WizardCore")
 set(wCOMPANY_NAME               "Mr. Wizard FX")
 set(wCOMPANY_ID                 "MrWizardFX")
 set(wPROJECT_VERSION            "0.1.0")
