@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace audio_plugin {
+namespace WizardCore {
 
 std::unique_ptr<DelayLine> DelayLine::create(DelayType type)
 {
@@ -30,5 +30,5 @@ std::unique_ptr<DelayLine> DelayLine::createBBD()
 
 
 
-} // namespace audio_plugin
+} // namespace WizardCore
 

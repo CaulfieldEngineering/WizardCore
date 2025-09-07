@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace audio_plugin
+namespace WizardCore
 {
 
 // ============================================================================
@@ -432,4 +432,4 @@ void BBDelayLine::resetStages()
     }
 }
 
-} // namespace audio_plugin
+} // namespace WizardCore

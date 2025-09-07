@@ -6,7 +6,7 @@
 #include "../DelayLine/DelayLine.h"
 #include <array>
 
-namespace audio_plugin {
+namespace WizardCore {
 
 /**
  * @brief A multi-voice chorus effect using modulated delay lines
@@ -334,4 +334,4 @@ private:
     void updateHPFCoefficients(int channel);
 };
 
-} // namespace audio_plugin
+} // namespace WizardCore

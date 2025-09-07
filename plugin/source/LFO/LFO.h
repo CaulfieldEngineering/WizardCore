@@ -9,7 +9,7 @@
 #define M_PI juce::MathConstants<double>::pi
 #endif
 
-namespace audio_plugin {
+namespace WizardCore {
 
 /**
  * @brief Professional Low Frequency Oscillator (LFO) Module
@@ -492,4 +492,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LFO)
 };
 
-} // namespace audio_plugin
+} // namespace WizardCore

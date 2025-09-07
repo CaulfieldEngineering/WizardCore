@@ -4,7 +4,7 @@
 #include <vector>
 #include <atomic>
 
-namespace audio_plugin {
+namespace WizardCore {
 
 /**
  * @brief Available delay line types
@@ -205,4 +205,4 @@ public:
 
 };
 
-} // namespace audio_plugin
+} // namespace WizardCore

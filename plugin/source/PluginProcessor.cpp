@@ -364,9 +364,9 @@ namespace audio_plugin {
             // Update delay type if changed
             if (delayTypeChanged.load() && chorusDelayTypeParam) {
                 const float delayTypeChoice = *chorusDelayTypeParam;
-                const DelayType delayType = (delayTypeChoice < 0.5f) ? DelayType::DigitalDelay : DelayType::BBDelay;
+                const WizardCore::DelayType delayType = (delayTypeChoice < 0.5f) ? WizardCore::DelayType::DigitalDelay : WizardCore::DelayType::BBDelay;
                 chorus.setDelayType(delayType);
-                DBG("PluginProcessor: Delay type updated to: " << (delayType == DelayType::DigitalDelay ? "Digital" : "Bucket Brigade")
+                DBG("PluginProcessor: Delay type updated to: " << (delayType == WizardCore::DelayType::DigitalDelay ? "Digital" : "Bucket Brigade")
                     << " (raw value: " << delayTypeChoice << ")");
             }
 
@@ -389,7 +389,7 @@ namespace audio_plugin {
 
             // Update stereo parameters
             if (chorusStereoModeChanged.load() && chorusStereoModeParam) {
-                chorus.setStereoMode(static_cast<audio_plugin::Chorus::PanningMode>(static_cast<int>(*chorusStereoModeParam)));
+                chorus.setStereoMode(static_cast<WizardCore::Chorus::PanningMode>(static_cast<int>(*chorusStereoModeParam)));
             }
             if (chorusStereoSpreadChanged.load() && chorusStereoSpreadParam) {
                 chorus.setStereoSpread(static_cast<float>(*chorusStereoSpreadParam));

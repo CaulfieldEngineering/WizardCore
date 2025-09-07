@@ -8,9 +8,9 @@
 #include <atomic>
 
 // Forward declaration
-namespace audio_plugin { class DigitalDelayLine; }
+namespace WizardCore { class DigitalDelayLine; }
 
-namespace audio_plugin
+namespace WizardCore
 {
 
 /**
@@ -330,4 +330,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BBDelayLine)
 };
 
-} // namespace audio_plugin
+} // namespace WizardCore

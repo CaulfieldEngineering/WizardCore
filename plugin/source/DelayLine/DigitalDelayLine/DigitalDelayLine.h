@@ -5,7 +5,7 @@
 #include <vector>
 #include <atomic>
 
-namespace audio_plugin {
+namespace WizardCore {
 
 /**
  * @brief A thread-safe, interpolating digital delay line for audio processing
@@ -338,4 +338,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DigitalDelayLine)
 };
 
-} // namespace audio_plugin
+} // namespace WizardCore

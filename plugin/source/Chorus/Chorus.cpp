@@ -3,7 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "../DelayLine/DelayLine.h"
 
-namespace audio_plugin {
+namespace WizardCore {
 
 // ============================================================================
 // CONSTRUCTOR & DESTRUCTOR
@@ -959,4 +959,4 @@ void Chorus::processFilters(juce::AudioBuffer<float>& wetBuffer) {
     }
 }
 
-} // namespace audio_plugin
+} // namespace WizardCore

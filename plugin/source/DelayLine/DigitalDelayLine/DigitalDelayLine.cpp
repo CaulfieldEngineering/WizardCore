@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace audio_plugin {
+namespace WizardCore {
 
 // ============================================================================
 // CONSTRUCTOR & DESTRUCTOR
@@ -386,4 +386,4 @@ void DigitalDelayLine::updateReadPositions()
     }
 }
 
-} // namespace audio_plugin
+} // namespace WizardCore

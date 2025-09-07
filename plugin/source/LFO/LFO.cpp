@@ -7,7 +7,7 @@
 #define M_PI juce::MathConstants<double>::pi
 #endif
 
-namespace audio_plugin {
+namespace WizardCore {
 
 // ============================================================================
 // CONSTRUCTOR & DESTRUCTOR
@@ -1018,4 +1018,4 @@ void LFO::generateHumpUpWave()
 // CONFIG STRUCT METHODS
 // ============================================================================
 
-} // namespace audio_plugin
+} // namespace WizardCore

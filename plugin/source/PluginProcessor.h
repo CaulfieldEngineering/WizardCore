@@ -58,8 +58,8 @@ public:
     juce::AudioProcessorValueTreeState parameters;
     
     // Public access to DSP objects for the editor (for debug UI)
-    Chorus& getChorus() { return chorus; }
-    LFO& getTestLFO() { return testLFO; }
+    WizardCore::Chorus& getChorus() { return chorus; }
+    WizardCore::LFO& getTestLFO() { return testLFO; }
 
 private:
     //==============================================================================
@@ -76,10 +76,10 @@ private:
 		//juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedMix;
 
 	// Chorus ============================================================
-	Chorus chorus;  // Initialized with MAX_CHORUS_VOICES voices in constructor
+	WizardCore::Chorus chorus;  // Initialized with MAX_CHORUS_VOICES voices in constructor
 	
 	// Test LFO for UI development
-	LFO testLFO;  // Standalone LFO for testing the UI
+	WizardCore::LFO testLFO;  // Standalone LFO for testing the UI
 	
 	// Global Chorus parameter pointers for quick access
 	std::atomic<float>* chorusRateParam = nullptr;
