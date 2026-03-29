@@ -4,7 +4,7 @@
 set(wPLUGIN_NAME                "WizardCore")
 set(wCOMPANY_NAME               "Mr. Wizard FX")
 set(wCOMPANY_ID                 "MrWizardFX")
-set(wPROJECT_VERSION            "0.1.0")
+set(wPROJECT_VERSION            "0.2.0")
 set(wPLUGIN_MANUFACTURER_CODE   "MRWZ")
 set(wFORMATS                    VST3 Standalone)
 

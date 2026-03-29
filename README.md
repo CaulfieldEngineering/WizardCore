@@ -1,92 +1,121 @@
-# HallSandbox – Reverb Prototype
+# WizardCore
 
-## 🎯 Objective
-
-Build a modular, from-scratch hall-style reverb effect using JUCE and C++. This project is intended for DSP exploration, education, and rapid prototyping—not commercial release (yet). Focus is on transparent structure, modularity, and sound quality over GUI or cross-DAW polish.
+Shared DSP and utility library for Wonderland Audio plugin projects. Contains reusable C++ audio modules that are consumed by plugin repositories as a versioned dependency — no copy-pasting required.
 
 ---
 
-## ✅ Requirements
+## What's in here
 
-### 1. Plugin Format
-- [ ] JUCE Standalone application (initial target)
-- [ ] Optional VST3 build for DAW testing
+All modules live under `plugin/source/` and are exposed under the `WizardCore` C++ namespace.
 
-### 2. Signal Flow
-
-```
-Input →
-  [ Pre-Delay ] →
-  [ Early Reflections (Taps) ] →
-  [ Series Diffusion (Allpass Filters) ] →
-  [ Parallel Comb Filters + Damping ] →
-  [ Wet Mix ] →
-Dry/Wet Crossfade → Output
-```
-
-### 3. Parameters
-- [ ] `Reverb Time` (affects comb feedback coefficients)
-- [ ] `Pre-Delay` (ms)
-- [ ] `Damping` (lowpass filter cutoff in comb feedback)
-- [ ] `Diffusion` amount (optional, controls allpass feedback)
-- [ ] `Wet/Dry Mix`
-- [ ] `Output Gain` (optional)
-
-### 4. Architecture
-- [ ] Implement all filters/delays from scratch using JUCE primitives
-- [ ] Modular, reusable C++ components:
-  - `CombFilter`
-  - `AllpassFilter`
-  - `ReverbTank`
-  - `Diffuser` (if broken out separately)
-- [ ] Sample-rate and block-size aware
-- [ ] Minimal use of JUCE DSP classes unless necessary
-- [ ] Platform-independent design (macOS/Windows parity)
-
-### 5. Debugging & Exploratory Tools
-- [ ] Toggle stages (pre-delay, diffusion, tank)
-- [ ] Optionally plot or print internal delay states
-- [ ] Tail decay observation methods
+| Module | Path | Description |
+|---|---|---|
+| `LFO` | `plugin/source/LFO/` | Multi-waveform LFO with host sync, phase offset, symmetry control, and parameter smoothing |
+| `DelayLine` | `plugin/source/DelayLine/` | Abstract delay line interface with two concrete implementations: `DigitalDelayLine` (clean) and `BBDelayLine` (bucket-brigade emulation). Factory methods: `DelayLine::create()`, `DelayLine::createDigital()`, `DelayLine::createBBD()` |
+| `Chorus` | `plugin/source/Chorus/` | Multi-voice chorus built on top of `LFO` and `DelayLine`. Supports mono, stereo, and mid-side panning modes, per-voice control, and optional LPF/HPF filtering |
 
 ---
 
-## 📁 File Structure Proposal
+## How to use it in a plugin project
 
-```
-/Source
-  /ReverbCore
-    CombFilter.h/.cpp
-    AllpassFilter.h/.cpp
-    ReverbTank.h/.cpp
-    Diffuser.h/.cpp
-    HallSandboxProcessor.h/.cpp
-  PluginEditor.h/.cpp
-  PluginProcessor.h/.cpp
+WizardCore is consumed via **CPM (CMake Package Manager)**. Add the following to your project's root `CMakeLists.txt`:
+
+```cmake
+CPMAddPackage(
+    NAME WizardCore
+    GIT_TAG staging
+    GITHUB_REPOSITORY CaulfieldEngineering/WizardCore
+    SOURCE_DIR ${LIB_DIR}/wizardcore
+)
 ```
 
+Then link against it in your plugin's `CMakeLists.txt`:
+
+```cmake
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        WizardCore::AudioModules   # links all modules at once
+)
+```
+
+Or link individual modules if you only need a subset:
+
+```cmake
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        WizardCore::LFO
+        WizardCore::DelayLine
+)
+```
+
+### Available CMake targets
+
+| Target | Contents |
+|---|---|
+| `WizardCore::LFO` | LFO module only |
+| `WizardCore::DelayLine` | DelayLine module only |
+| `WizardCore::Chorus` | Chorus module (pulls in LFO and DelayLine) |
+| `WizardCore::AudioModules` | All modules (convenience umbrella target) |
+
 ---
 
-## 🧪 MVP Acceptance Criteria
+## How to use the modules in C++
 
-- [ ] Standalone app compiles and runs
-- [ ] Clear reverb tail audible on input
-- [ ] Real-time control of reverb time and mix
-- [ ] Bypass works cleanly
-- [ ] Sound is musically useful (subjective evaluation)
+All modules follow the same pattern: construct, `prepare()`, then process.
+
+```cpp
+#include "LFO/LFO.h"
+#include "DelayLine/DelayLine.h"
+#include "Chorus/Chorus.h"
+
+// LFO
+WizardCore::LFO lfo;
+lfo.prepare(sampleRate);
+lfo.setFrequency(2.0);
+lfo.setWaveShape(WizardCore::LFO::WaveShape::Triangle);
+float value = lfo.getNextSample();  // call once per sample
+
+// DelayLine (BBD emulation by default)
+auto delay = WizardCore::DelayLine::create(WizardCore::DelayType::BBDelay);
+delay->prepare(sampleRate, 1.0, numChannels);  // 1 second max delay
+delay->setDelayTimeInSeconds(0.025);           // 25ms
+delay->processBlock(audioBuffer);
+
+// Chorus
+WizardCore::Chorus chorus(5);  // up to 5 voices
+chorus.prepare(sampleRate, numChannels);
+chorus.setRate(1.0f);
+chorus.setDepth(0.5f);
+chorus.setMix(0.7f);
+chorus.processBlock(audioBuffer);
+```
 
 ---
 
-## 🔭 Stretch Goals
+## Dual-mode build
 
-- [ ] LFO-based modulation of delay lines
-- [ ] IR export for comparison with real halls
-- [ ] Shimmer / pitch-shifted feedback experiment
-- [ ] Basic unit tests on core filters
+WizardCore's `CMakeLists.txt` automatically detects how it is being built:
+
+- **Direct build** (`cmake -S . -B build` inside this repo): builds a full standalone/VST3 plugin. Useful for developing and auditioning modules in isolation.
+- **Subproject mode** (imported via CPM by another repo): only the `WizardCore::` CMake targets are created. The full plugin is skipped.
+
+Detection is based on whether `CMAKE_PROJECT_NAME == PROJECT_NAME`.
 
 ---
 
-## 📌 Notes
+## Adding a new module
 
-- This is not a product yet.
-- Focus on modular DSP architecture and experimentation.
-- UX and polish will come later, if this evolves toward release.
+1. Create a folder under `plugin/source/YourModule/`
+2. Add `YourModule.h` and `YourModule.cpp` — use the `WizardCore` namespace
+3. Register it in `plugin/source/CMakeLists.txt` following the existing pattern (add an `INTERFACE` library target, alias it to `WizardCore::YourModule`, and add it to `WizardCore_AudioModules`)
+4. Write tests (tests go in `test/` — currently scaffolded but not yet active)
+
+---
+
+## Project info
+
+- **Company:** Mr. Wizard FX
+- **CMake minimum:** 3.22
+- **C++ standard:** C++23 (C++20 on macOS until upstream JUCE fix)
+- **JUCE version:** 8.0.8
+- **Branch convention:** `staging` is the main branch
