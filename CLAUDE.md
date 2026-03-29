@@ -55,12 +55,17 @@ Detection: `if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)` — equal means direct
 All modules follow: construct → `prepare()` → process.
 
 ```cpp
+#include "Chorus/Chorus.h"   // Include root is plugin/source/, NOT WizardCore/Chorus/...
 #include "LFO/LFO.h"
+#include "DelayLine/DelayLine.h"
+
 WizardCore::LFO lfo;
 lfo.prepare(sampleRate);
 lfo.setFrequency(2.0);
 float value = lfo.getNextSample(); // call once per sample
 ```
+
+**Include path convention:** The CMake targets set `plugin/source/` as the include directory. Use `Module/Module.h`, never `WizardCore/Module/Module.h`.
 
 ## Key conventions
 
