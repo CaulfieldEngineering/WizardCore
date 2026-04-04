@@ -61,66 +61,23 @@ enable_testing()
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # ============================================================================
-    # DIRECT BUILD MODE: Building WizardOne as the main project
+    # DIRECT BUILD MODE: Building WizardCore as the main project
     # ============================================================================
-    # This happens when someone runs: cd WizardOne && cmake -S . -B build
-    # Build the complete WizardOne plugin with UI, parameters, and audio modules
-    
-    message(STATUS "WizardOne: Building as main project (full plugin)")
-    
-    # ============================================================================
-    # JUCE FRAMEWORK IMPORT (only needed for direct builds)
-    # ============================================================================
-    # When building WizardOne directly, we need to import JUCE
-    # When imported as subproject, the parent project (e.g., ChorusSandbox) has already imported JUCE
-    
-    message(STATUS "  → Importing JUCE framework")
+    # This happens when someone runs: cd WizardCore && cmake -S . -B build
+    # Or when CI runs to verify the library compiles.
+    # We only build the audio modules — there is no standalone plugin.
+
+    message(STATUS "WizardOne: Building as main project (audio modules only)")
+
     CPMAddPackage(
         NAME JUCE
-        GIT_TAG 8.0.8  # ← Updated to latest stable release
+        GIT_TAG 8.0.8
         GITHUB_REPOSITORY juce-framework/JUCE
         SOURCE_DIR ${LIB_DIR}/juce
     )
-    
-    # ============================================================================
-    # DEMO/FULL VERSION CONFIGURATION (only needed for direct builds)
-    # ============================================================================
-    if (BUILD_DEMO)
-        set(DEMO_BUILD True)
-        message(STATUS "  → Building Demo version")
-    else()
-        set(DEMO_BUILD False)
-        message(STATUS "  → Building Full version")
-    endif()
-    
-    # ============================================================================
-    # INSTALLER PACKAGE CONFIGURATION (only needed for direct builds)
-    # ============================================================================
-    # Configure installer templates with project variables for packaging
-    
-    message(STATUS "  → Configuring Windows installer templates")
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/package_config/installer_win.iss.in
-        ${CMAKE_BINARY_DIR}/installer_win.iss
-        @ONLY
-    )
-    
-    message(STATUS "  → Configuring macOS installer templates")
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-full.xml
-        ${CMAKE_BINARY_DIR}/distribution-full.xml
-        @ONLY
-    )
-    
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/package_config/mac/distribution-demo.xml
-        ${CMAKE_BINARY_DIR}/distribution-demo.xml
-        @ONLY
-    )
-    
-    add_subdirectory(plugin)         # Complete plugin implementation
-    add_subdirectory(plugin/images)  # Plugin assets and resources
-    
+
+    add_subdirectory(plugin/source)
+
 else()
     # ============================================================================
     # LIBRARY MODE: WizardOne imported as audio module provider
