@@ -80,11 +80,12 @@ void BBDelayLine::setDelayTimeInSeconds(double delayTimeInSeconds, bool withSmoo
     const double clampedDelay = std::clamp(delayTimeInSeconds, MIN_DELAY_TIME, maxDelayTimeSeconds.load());
     config.delayTimeInSeconds.store(clampedDelay);
     
-    // Only update clock frequency if prepared
+    // Only update clock frequency and filters if prepared
     if (isPrepared())
     {
         updateClockFrequency();
-        if (coreDelay) 
+        updateFilterCutoffs();
+        if (coreDelay)
         {
             coreDelay->setDelayTimeInSeconds(clampedDelay, withSmoothing);
         }
@@ -166,32 +167,51 @@ float BBDelayLine::processSample(int channel, float input)
 {
     jassert(isPrepared());
     jassert(channel >= 0 && channel < numChannels.load());
-    
+
     // Early return if disabled
     if (!config.enabled.load())
     {
         return input;
     }
-    
+
     // Apply input filtering if enabled
-    float filteredInput = config.filteringEnabled.load() ? 
+    float filteredInput = config.filteringEnabled.load() ?
         inputFilters[channel].processSingleSampleRaw(input) : input;
-    
-    // Use stable timing core delay to compute delayed value at current delay setting
+
+    // Soft saturation — models limited headroom of real BBD stages
+    // Fixed drive characteristic of the circuit, not user-adjustable
+    filteredInput = std::tanh(filteredInput * Config::SATURATION_DRIVE)
+                  / std::tanh(Config::SATURATION_DRIVE);
+
+    // Clock jitter — models instability of the analog clock oscillator
+    // Scales with delay time (longer delay = more accumulated timing error)
+    if (coreDelay)
+    {
+        const double baseDelay = config.delayTimeInSeconds.load();
+        const double jitter = (random.nextFloat() * 2.0f - 1.0f)
+                            * Config::CLOCK_JITTER * baseDelay;
+        coreDelay->setDelayTimeInSeconds(baseDelay + jitter, false);
+    }
+
+    // Use stable timing core delay to compute delayed value
     float delayedCore = coreDelay ? coreDelay->processSample(channel, filteredInput) : filteredInput;
-    
-    // Impose BBD transfer droop by running through lightweight stage model without clock shifts
-    // Approximate cumulative droop over N stages by N small one-tap leaks on each sample
-    // Use a compact approximation: y = delayedCore * pow(droopFactor, numStages * 0.25f)
-    // (0.25 reduces over-attenuation compared to full-stage cascade)
-    const float droopGain = std::pow(config.droopFactor.load(), 
-        static_cast<float>(config.stageCount.load()) * 0.25f);
+
+    // Droop — capacitor discharge across stages
+    // Logarithmic scaling so there's usable range before signal disappears
+    const float stageScale = std::log2(static_cast<float>(config.stageCount.load()) + 1.0f) * 0.15f;
+    const float droopGain = std::pow(config.droopFactor.load(), stageScale);
     float output = delayedCore * droopGain;
-    
+
+    // Noise floor — thermal noise that accumulates per stage transfer
+    // Scales with stage count (more stages = more noise, physically accurate)
+    const float noiseLevel = Config::NOISE_PER_STAGE
+                           * static_cast<float>(config.stageCount.load());
+    output += (random.nextFloat() * 2.0f - 1.0f) * noiseLevel;
+
     // Apply output filtering if enabled
-    float filteredOutput = config.filteringEnabled.load() ? 
+    float filteredOutput = config.filteringEnabled.load() ?
         outputFilters[channel].processSingleSampleRaw(output) : output;
-    
+
     return filteredOutput;
 }
 
@@ -332,6 +352,7 @@ void BBDelayLine::setEnabled(bool enabled)
     config.enabled.store(enabled);
 }
 
+
 // ============================================================================
 // BATCH PARAMETER UPDATES
 // ============================================================================
@@ -376,12 +397,20 @@ void BBDelayLine::updateFilterCutoffs()
     {
         return;
     }
-        
-    // Set LPF cutoff based on the effective BBD bandwidth (~ f_clk / 2), but
-    // relax slightly to preserve articulation; add a lower bound to avoid over-muffling.
+
+    // Logarithmic filter rolloff — preserves brightness at short delays,
+    // darkens gradually at longer delays. Maps clock frequency to cutoff
+    // using a log curve so there's a wide usable range before degradation.
     const double currentClock = smoothedClockFreq.getCurrentValue();
-    const double targetCutoffHz = std::clamp(currentClock * 0.35, 3500.0, 11000.0);
-    
+    const double minCutoff = 2000.0;
+    const double maxCutoff = 16000.0;
+
+    // Log-scale: at high clock rates (short delay) cutoff is near max,
+    // at low clock rates (long delay) it tapers toward min
+    const double clockRatio = std::clamp(currentClock / (sampleRateHz.load() * 0.4), 0.001, 1.0);
+    const double logCurve = std::log10(clockRatio * 9.0 + 1.0);  // 0.0 to 1.0, logarithmic
+    const double targetCutoffHz = minCutoff + (maxCutoff - minCutoff) * logCurve;
+
     for (int ch = 0; ch < numChannels.load(); ++ch)
     {
         auto lpf = juce::IIRCoefficients::makeLowPass(sampleRateHz.load(), targetCutoffHz, 0.707f);

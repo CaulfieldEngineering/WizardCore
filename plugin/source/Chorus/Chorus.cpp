@@ -56,9 +56,9 @@ void Chorus::prepare(double sampleRateIn, int numChannels) {
             voice.lfos[lfoIndex].setCoupling(LFO::CouplingType::AC);  // Use AC coupling for bipolar output [-1,1]
         }
         
-        // Prepare delay lines with maximum delay time needed
-        // Base delay + max modulation depth = max possible delay
-        double maxDelayTime = (voice.baseDelayMs.load() + MAX_DELAY_MS) * 0.001; // Convert ms to seconds
+        // Prepare delay lines with enough headroom for the full parameter range
+        // Use MAX_BASE_DELAY (not current base delay) so delay can be swept freely
+        double maxDelayTime = (MAX_BASE_DELAY + MAX_DELAY_MS) * 0.001; // Convert ms to seconds
         
         // Prepare both delay lines independently
         for (int channel = 0; channel < 2; ++channel) {
@@ -365,8 +365,8 @@ void Chorus::setDelayType(DelayType delayType) {
                 // Create new delay line of the specified type
                 voices[i].delayLines[ch] = DelayLine::create(delayType);
                 
-                // Re-prepare with same settings
-                double maxDelayTime = (voices[i].baseDelayMs.load() + MAX_DELAY_MS) * 0.001;
+                // Re-prepare with full headroom for the entire parameter range
+                double maxDelayTime = (MAX_BASE_DELAY + MAX_DELAY_MS) * 0.001;
                 voices[i].delayLines[ch]->prepare(sampleRate.load(), maxDelayTime, 1);
                 
                 // Set delay time

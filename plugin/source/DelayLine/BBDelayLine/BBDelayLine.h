@@ -49,7 +49,13 @@ public:
         std::atomic<bool> filteringEnabled{true};            ///< Anti-aliasing filter state
         std::atomic<double> delayTimeInSeconds{0.03};        ///< Target delay time in seconds
         std::atomic<double> smoothingTimeInSeconds{0.02};    ///< Smoothing ramp time in seconds
-        
+
+        // Analog character — derived from physical BBD behavior, not user-adjustable.
+        // These are fixed properties of the emulated circuit.
+        static constexpr float SATURATION_DRIVE = 1.4f;      ///< Soft clipping (~4V headroom)
+        static constexpr float CLOCK_JITTER = 0.0004f;       ///< Clock oscillator instability (±0.04% of delay)
+        static constexpr float NOISE_PER_STAGE = 0.0000008f; ///< Thermal noise per stage transfer
+
         // Musical/sync parameters
         std::atomic<bool> enabled{true};                     ///< Enabled state
     };
@@ -213,6 +219,7 @@ public:
      */
     void setEnabled(bool enabled);
 
+
     // ============================================================================
     // INDIVIDUAL PARAMETER GETTERS
     // ============================================================================
@@ -298,6 +305,9 @@ private:
     
     // Core interpolating delay engine to avoid pitch drift while retaining BBD coloration
     std::unique_ptr<DigitalDelayLine> coreDelay;     // PRIVATE - stable timing core
+
+    // Random generator for clock jitter and noise floor
+    juce::Random random;
 
     // ============================================================================
     // PRIVATE HELPER METHODS
