@@ -69,6 +69,22 @@ cmake_minimum_required(VERSION 3.22)
         juce::juce_dsp
     )
     
+    # Saturation Module
+    add_library(WizardCore_Saturation INTERFACE)
+
+    target_sources(WizardCore_Saturation INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Saturation/Saturation.cpp
+    )
+
+    target_include_directories(WizardCore_Saturation INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    target_link_libraries(WizardCore_Saturation INTERFACE
+        juce::juce_audio_utils
+        juce::juce_dsp
+    )
+
     # ============================================================================
     # CREATE MODERN CMAKE ALIASES WITH :: NAMESPACE
     # ============================================================================
@@ -78,6 +94,7 @@ cmake_minimum_required(VERSION 3.22)
     add_library(WizardCore::Chorus ALIAS WizardCore_Chorus)
     add_library(WizardCore::LFO ALIAS WizardCore_LFO)
     add_library(WizardCore::DelayLine ALIAS WizardCore_DelayLine)
+    add_library(WizardCore::Saturation ALIAS WizardCore_Saturation)
     
     # ============================================================================
     # UMBRELLA TARGET (convenience target for importing all modules at once)
@@ -88,8 +105,9 @@ cmake_minimum_required(VERSION 3.22)
     add_library(WizardCore_AudioModules INTERFACE)
     target_link_libraries(WizardCore_AudioModules INTERFACE
         WizardCore_Chorus      # Includes Chorus module
-        WizardCore_LFO         # Includes LFO module  
+        WizardCore_LFO         # Includes LFO module
         WizardCore_DelayLine   # Includes DelayLine module
+        WizardCore_Saturation  # Includes Saturation module
     )
     
     # Create modern alias for the umbrella target
